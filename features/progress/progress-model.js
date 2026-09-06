@@ -74,6 +74,31 @@ export function initAttemptProgressContext({ attempt, fieldId, unit, questionIds
 }
 
 /**
+ * ページリロード等でcontextsが失われた状態から、getAttemptProgressで取得済みの
+ * progressレスポンスをそのまま文脈へ復元する（Phase3C本体）。
+ * initAttemptProgressContext()と異なり、retryRound/wrongQuestionIdsを0/[]へ初期化せず、
+ * GAS側に保存されていた値をそのまま復元する（中断前の状態を正確に再現するため）。
+ *
+ * @param {Object} progress - getAttemptProgressのレスポンスのprogress部分（null不可）
+ */
+export function restoreAttemptProgressContext(progress) {
+  if (!progress?.attemptId) return;
+
+  contexts.set(progress.attemptId, {
+    studentId: progress.studentId,
+    fieldId: progress.fieldId,
+    unit: progress.unit,
+    sourceType: progress.sourceType,
+    testSetId: progress.testSetId,
+    questionIds: [...(progress.questionIds || [])],
+    wrongQuestionIds: [...(progress.wrongQuestionIds || [])],
+    retryRound: progress.retryRound,
+    retryWrongEnabled: Boolean(progress.retryWrongEnabled),
+    startedAt: progress.startedAt
+  });
+}
+
+/**
  * retry開始時に、実際にretryで出題される順序（シャッフル後）をwrongQuestionIdsとして
  * 記録し、retryRoundを1へ進める。通常ラウンドのquestionIds（context.questionIds）は
  * 一切書き換えない。

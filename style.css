@@ -298,6 +298,54 @@ select {
   display: none;
 }
 
+.resume-progress {
+  margin: 18px 0;
+  padding: 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+}
+
+.resume-progress.hidden {
+  display: none;
+}
+
+.resume-progress-text {
+  margin: 0 0 4px;
+  font-weight: bold;
+  color: #1e3a8a;
+}
+
+.global-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.global-confirm-modal.hidden {
+  display: none;
+}
+
+.global-confirm-card {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+
+.global-confirm-text {
+  margin: 0;
+  color: #1e293b;
+  font-weight: bold;
+}
+
 .checkbox-inline {
   display: flex;
   align-items: center;

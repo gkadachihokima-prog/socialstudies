@@ -177,3 +177,70 @@ export function finishRun() {
 export function abortRun() {
   runnerState = createRunnerState();
 }
+
+/**
+ * Phase3C本体: ページリロード等でrunnerStateが失われた状態から、resume対象progress
+ * （sourceType==="testset"）をもとにTestSet全体の進行状態を再構築する。
+ *
+ * 新しいstartAttempt送信・questionIds再抽選は一切行わない。既に完了済みグループの
+ * 得点は、新規GAS呼び出しを増やさず、生徒選択時に既に復元済みのAttempt一覧
+ * （features/history/learning-record-restore-integration.js、priorAttempts引数）から
+ * 同一testSetId・completed=trueのAttemptを検索して再構成する。
+ *
+ * Attemptモデル自体にfieldId列は無いため（features/history/attempt-model.js参照）、
+ * questionSetIdの既定形式`<fieldId>__<coursePurposeId>__<slug>`
+ * （config/course-purposes.jsのbuildQuestionSetId、features/question-set/
+ * question-set-loader.jsで生成）からfieldIdを導出する。新しいAttempt列は追加しない。
+ *
+ * @param {Object} params
+ * @param {{testSetId:string, label:string}} params.testSet - loadTestSet()のtestSet部分
+ * @param {Array<{fieldId:string, questionId:string}>} params.questions - loadTestSet()のquestions部分
+ * @param {string} params.resumeFieldId - resume対象progressのfieldId（現在再開すべきグループ）
+ * @param {Array<import("../history/attempt-model.js").Attempt>} params.priorAttempts - 同一studentIdの既存Attempt一覧
+ * @returns {{ok:true}|{ok:false, errorMessage:string}}
+ */
+export function restoreRunnerState({ testSet, questions, resumeFieldId, priorAttempts }) {
+  const groups = groupQuestionsByField(Array.isArray(questions) ? questions : []);
+  const groupIndex = groups.findIndex((group) => group.fieldId === resumeFieldId);
+
+  if (groupIndex === -1) {
+    return { ok: false, errorMessage: "テスト対策の問題データに不整合があります。先生に確認してください。" };
+  }
+
+  const testSetId = String(testSet?.testSetId || "");
+  const results = [];
+
+  for (let i = 0; i < groupIndex; i += 1) {
+    const group = groups[i];
+    const candidates = (Array.isArray(priorAttempts) ? priorAttempts : []).filter((attempt) => {
+      const attemptFieldId = String(attempt?.questionSetId || "").split("__")[0];
+      return (
+        attempt?.sourceType === "testset" &&
+        attempt?.testSetId === testSetId &&
+        attemptFieldId === group.fieldId &&
+        attempt?.completed === true
+      );
+    });
+
+    if (candidates.length === 0) {
+      return { ok: false, errorMessage: "前回の続きのデータに不整合があります。先生に確認してください。" };
+    }
+
+    // 同一fieldIdに複数の完了済みAttemptが存在する場合(通常運用では発生しない想定)は、
+    // 最も新しく完了したものを採用する。
+    candidates.sort((a, b) => (a.completedAt < b.completedAt ? 1 : -1));
+    const latest = candidates[0];
+    results.push({ fieldId: group.fieldId, correct: latest.score, total: latest.totalCount });
+  }
+
+  runnerState = {
+    active: true,
+    testSetLabel: String(testSet?.label || ""),
+    testSetId,
+    groups,
+    currentGroupIndex: groupIndex,
+    results
+  };
+
+  return { ok: true };
+}

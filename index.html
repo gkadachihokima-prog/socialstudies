@@ -127,6 +127,15 @@
           <div id="selected-student-label" class="selected-student hidden"></div>
         </div>
 
+        <div id="resume-progress" class="resume-progress hidden">
+          <p id="resume-progress-text" class="resume-progress-text"></p>
+          <div class="button-row">
+            <button id="resume-continue-button" class="primary-button" type="button">続きから</button>
+            <button id="resume-discard-button" class="secondary-button" type="button">この続きはやめる</button>
+          </div>
+          <p id="resume-progress-error" class="error-message"></p>
+        </div>
+
         <div class="filter-grid">
           <div class="form-group">
             <label for="subject-select">科目</label>
@@ -414,6 +423,17 @@
         <button id="tss-home-back-button" class="secondary-button">ホームへ戻る</button>
       </div>
     </section>
+
+    <div id="global-confirm-modal" class="global-confirm-modal hidden">
+      <div class="global-confirm-card">
+        <p id="global-confirm-text" class="global-confirm-text"></p>
+        <p id="global-confirm-error" class="error-message"></p>
+        <div class="button-row">
+          <button id="global-confirm-yes-button" class="primary-button" type="button">はい</button>
+          <button id="global-confirm-cancel-button" class="secondary-button" type="button">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="app.js"></script>

@@ -5,7 +5,7 @@ import {
   resetUiState
 } from "./core/state.js";
 import { normalizeQuestion, buildFallbackQuestionId } from "./core/question-normalizer.js";
-import { prepareQuizStart, startRetryWrongRound } from "./core/quiz-controller.js";
+import { prepareQuizStart, startRetryWrongRound, prepareResumedQuiz } from "./core/quiz-controller.js";
 import { pickQuestions } from "./core/question-picker.js";
 import {
   buildResultMessage,
@@ -55,7 +55,12 @@ import { recordAnswerForAttempt } from "./features/history/answer-record-integra
 import { completeAttempt } from "./features/history/attempt-complete-integration.js";
 import { restoreStudentLearningRecords } from "./features/history/learning-record-restore-integration.js";
 import { syncAttemptProgressRetryStart } from "./features/history/learning-record-sync-integration.js";
-import { extractQuestionIds, resolveUnitForSourceType } from "./features/progress/progress-model.js";
+import { extractQuestionIds, resolveUnitForSourceType, restoreAttemptProgressContext } from "./features/progress/progress-model.js";
+import { getAttemptProgress, abandonAttemptProgress } from "./services/learning-record-service.js";
+import { loadAttempt, loadAttemptsByStudent, saveAttempt } from "./features/history/attempt-service.js";
+import { loadAnswerRecordsByAttempt } from "./features/history/answer-record-service.js";
+import { loadTestSet } from "./services/test-set-service.js";
+import { SUBJECT_CONFIG } from "./config/subjects.js";
 import { renderHomeForStudent, toggleHomeDetail } from "./features/home/home-renderer.js";
 import { buildHomePracticeQuiz } from "./features/home/home-practice-controller.js";
 import { renderHistoryForStudent } from "./features/history/history-renderer.js";
@@ -71,7 +76,8 @@ import {
   hasNextGroup,
   advanceToNextGroup,
   finishRun,
-  abortRun
+  abortRun,
+  restoreRunnerState
 } from "./features/test-set-runner/test-set-runner.js";
 
 const homeScreen = document.getElementById("home-screen");
@@ -244,6 +250,22 @@ const startButton = document.getElementById("start-button");
 const startHomeBackButton = document.getElementById("start-home-back-button");
 const startError = document.getElementById("start-error");
 
+// Phase3C本体: 開始画面の再開候補（中断→続きから再開）UI要素。
+const resumeProgressBlock = document.getElementById("resume-progress");
+const resumeProgressText = document.getElementById("resume-progress-text");
+const resumeContinueButton = document.getElementById("resume-continue-button");
+const resumeDiscardButton = document.getElementById("resume-discard-button");
+const resumeProgressError = document.getElementById("resume-progress-error");
+
+// STEP4: resume候補競合確認は、Home（苦手復習・復習推奨）・start-screen（開始）・
+// TestSet（このテスト対策を始める）の複数画面から共通で使うため、特定の.screenの中に
+// 置かず、画面遷移とは独立したグローバルモーダルとして持つ（1箇所に集約、複製しない）。
+const globalConfirmModal = document.getElementById("global-confirm-modal");
+const globalConfirmText = document.getElementById("global-confirm-text");
+const globalConfirmError = document.getElementById("global-confirm-error");
+const globalConfirmYesButton = document.getElementById("global-confirm-yes-button");
+const globalConfirmCancelButton = document.getElementById("global-confirm-cancel-button");
+
 const quizStudent = document.getElementById("quiz-student");
 const quizSubject = document.getElementById("quiz-subject");
 const quizProgress = document.getElementById("quiz-progress");
@@ -317,6 +339,10 @@ tssHomeBackButton.addEventListener("click", returnToHome);
 startHomeBackButton.addEventListener("click", returnToHome);
 
 startButton.addEventListener("click", startQuiz);
+resumeContinueButton.addEventListener("click", handleResumeContinueClick);
+resumeDiscardButton.addEventListener("click", handleResumeDiscardClick);
+globalConfirmYesButton.addEventListener("click", handleGlobalConfirmYesClick);
+globalConfirmCancelButton.addEventListener("click", handleGlobalConfirmCancelClick);
 submitButton.addEventListener("click", handleSubmitButton);
 unknownAnswerButton.addEventListener("click", () => handleAnswer(UNKNOWN_ANSWER_VALUE));
 nextButton.addEventListener("click", goToNextQuestion);
@@ -378,7 +404,57 @@ async function initApp() {
 // Phase2 Task14-2: Task14-1で発行されたAttemptのIDを、回答確定時のAnswerRecord保存で使うために保持する。
 let currentDomainAttemptId = "";
 
+// Phase3C本体: 開始画面の再開候補（getAttemptProgressの結果、候補なしはnull）。
+let resumeCandidate = null;
+// 生徒切替race対策: この番号が発行時点の最新値と一致する場合のみ結果を反映する。
+let resumeCandidateRequestId = 0;
+// グローバル確認モーダルの「はい」「キャンセル」押下時に実行する処理（用途により差し替える）。
+let globalConfirmYesAction = null;
+let globalConfirmCancelAction = null;
+
+// STEP3/STEP4: resume候補が存在する状態で新しいAttemptを開始するすべての経路
+// （通常「開始」・Home「苦手を復習」「復習する」・TestSet「このテスト対策を始める」）が
+// 通る共通ガード。候補が無ければ即座にonProceedを実行してその戻り値をそのまま返す。
+// 候補がある場合は確認モーダルを表示し、
+//   - キャンセル: onProceedを実行せず、cancelResult（省略時undefined）で解決する
+//   - はい→abandon失敗: onProceedを実行せず、abandonFailResult（省略時undefined）で解決する
+//     （新規開始しない。エラーはグローバルモーダル内に表示する）
+//   - はい→abandon成功: 旧resume候補を隠し、onProceedを実行してその戻り値をそのまま返す
+// TestSet実行中の次グループ開始（finishCurrentTestSetGroupAndAdvance→startTestSetGroupQuiz）は
+// この関数を経由しない（「このテスト対策を始める」の最初の1回だけをガードする、STEP6）。
+function confirmAndAbandonResumeBeforeNewAttempt(onProceed, { cancelResult, abandonFailResult } = {}) {
+  if (!resumeCandidate) {
+    return onProceed();
+  }
+
+  const candidateAttemptId = resumeCandidate.attemptId;
+
+  return new Promise((resolve) => {
+    openGlobalConfirm(
+      "前回の続きは再開できなくなります。新しく始めますか？",
+      async () => {
+        try {
+          await abandonAttemptProgress(candidateAttemptId);
+        } catch (error) {
+          console.error("abandonAttemptProgress error（新規開始を中止します）:", error);
+          globalConfirmError.textContent = "前回の続きの削除に失敗しました。通信環境を確認して、もう一度お試しください。";
+          resolve(abandonFailResult);
+          return;
+        }
+        closeGlobalConfirm();
+        hideResumeCandidate();
+        resolve(await onProceed());
+      },
+      () => resolve(cancelResult)
+    );
+  });
+}
+
 async function startQuiz() {
+  await confirmAndAbandonResumeBeforeNewAttempt(executeStartQuiz);
+}
+
+async function executeStartQuiz() {
   const studentName = String(studentNameInput.value || "").trim();
   const studentId = String(studentIdInput.value || "").trim();
   const subject = String(subjectSelect.value || "").trim();
@@ -507,12 +583,15 @@ async function startPracticeSession(fieldId, practiceType) {
   await beginAttemptAndShowQuiz(PRACTICE_TYPE_TO_SOURCE_TYPE[practiceType] || null, null, state.session.unitFilter);
 }
 
+// STEP7: 苦手復習・復習推奨もresume候補競合の共通ガードを通す
+// （practiceType自体はstartPracticeSession内部でsourceTypeへ変換されるため、
+// ここでは呼び出し方を変えるだけで既存のマッピングロジックには触れない）。
 function startWeaknessReview(fieldId) {
-  return startPracticeSession(fieldId, "weak");
+  return confirmAndAbandonResumeBeforeNewAttempt(() => startPracticeSession(fieldId, "weak"));
 }
 
 function startDormantReview(fieldId) {
-  return startPracticeSession(fieldId, "dormant");
+  return confirmAndAbandonResumeBeforeNewAttempt(() => startPracticeSession(fieldId, "dormant"));
 }
 
 function getQuestionId(question) {
@@ -900,6 +979,13 @@ function backToStart() {
   // 実質的に無害（べき等）。
   syncStartScreenStudentDisplay();
   showStartScreen(startScreen, allScreens);
+
+  // STEP18: 中断（このbackToStart自体、既存どおりcompleteAttempt/abandonAttemptProgressは
+  // 呼ばない）直後に再び開始画面へ戻ってきた場合も、goToStartScreenFromHomeと同じく
+  // resume候補を取り直す（resume済みセッションをさらに中断した場合に、新しい
+  // currentQuestionIndexで再度resume表示できるようにするため）。
+  hideResumeCandidate();
+  fetchResumeCandidateForStartScreen();
 }
 
 function setupStudentAutocomplete() {
@@ -1004,6 +1090,11 @@ function handleHomeStudentSelect(student) {
 
   renderHomeForStudent(state.session.studentId, homeElements, homePracticeCallbacks);
 
+  // 生徒切替時は前の生徒のresume候補表示を即座にクリアする
+  // （Home「苦手を復習」「復習する」はstart-screenを経由しないため、resume候補は
+  // start-screen訪問を待たずここで取得しておく必要がある、STEP7）。
+  hideResumeCandidate();
+
   // Phase5-4: 現在のMemoryStorage内容でHomeを即座に表示した後、裏で学習記録GASから
   // 過去のAttempt/AnswerRecordを取得しMemoryStorageへ復元する（fire-and-forget、
   // ここではawaitしない）。復元完了時に生徒が切り替わっていた場合、古い生徒のデータで
@@ -1013,6 +1104,10 @@ function handleHomeStudentSelect(student) {
     if (result.ok && state.session.studentId === restoringStudentId) {
       renderHomeForStudent(state.session.studentId, homeElements, homePracticeCallbacks);
     }
+    // STEP7: resume候補の判定(loadAttempt存在チェック、fetchResumeCandidateForStartScreen内)は
+    // restoreStudentLearningRecordsによるAttempt Repository復元が終わった後でないと
+    // 正しく行えないため、成否に関わらずこの直後に呼ぶ（内部でstudentId一致を再確認する）。
+    fetchResumeCandidateForStartScreen();
   });
 }
 
@@ -1034,6 +1129,216 @@ function goToStartScreenFromHome() {
 
   syncStartScreenStudentDisplay();
   showStartScreen(startScreen, allScreens);
+
+  // STEP7: studentId確定・開始画面表示のタイミングでresume候補を取得する
+  // （studentId不明時はfetchResumeCandidateForStartScreen自体が何もしない）。
+  hideResumeCandidate();
+  fetchResumeCandidateForStartScreen();
+}
+
+// STEP7/STEP8: 開始画面表示のたびに、その時点で選択中のstudentIdについて
+// resume候補（getAttemptProgress）を取得する。生徒切替race対策として、
+// 発行時のrequestId・studentIdが取得完了時点でも最新であることを確認してから
+// 反映する（Phase5-4のrestoringStudentId確認と同じ考え方）。
+async function fetchResumeCandidateForStartScreen() {
+  const studentId = state.session.studentId;
+  if (!studentId) return;
+
+  const requestId = ++resumeCandidateRequestId;
+
+  let result;
+  try {
+    result = await getAttemptProgress(studentId);
+  } catch (error) {
+    // STEP37: 取得失敗時もアプリ全体・新規開始は通常どおり利用可能なままにする。
+    console.error("getAttemptProgress error（開始画面は通常どおり利用できます）:", error);
+    return;
+  }
+
+  if (requestId !== resumeCandidateRequestId || state.session.studentId !== studentId) {
+    return; // このリクエストは既に古い（生徒切替後）ため破棄する
+  }
+
+  if (!result.progress) {
+    hideResumeCandidate();
+    return;
+  }
+
+  // 復元先AttemptがRepositoryに存在しない場合（restoreStudentLearningRecords失敗等）は
+  // resumeを提示しない（completeAttempt等が後で失敗する不整合な状態を避けるため）。
+  if (!loadAttempt(result.progress.attemptId)) {
+    console.error(
+      "getAttemptProgressの再開候補に対応するAttemptがRepositoryに見つかりません（resumeを表示しません）:",
+      result.progress.attemptId
+    );
+    hideResumeCandidate();
+    return;
+  }
+
+  showResumeCandidate(result.progress);
+}
+
+// STEP10/11/12: resume候補の表示。内部値（sourceType/testSetId等）は表示せず、
+// 既存SUBJECT_CONFIGのlabelのみを使う（新しいlabel mapは作らない）。
+function showResumeCandidate(progress) {
+  resumeCandidate = progress;
+
+  const subjectLabel = SUBJECT_CONFIG[progress.fieldId]?.label || progress.fieldId;
+  const unitLabel = progress.unit && progress.unit !== "all" ? ` / ${progress.unit}` : "";
+  resumeProgressText.textContent = `前回の続き：${subjectLabel}${unitLabel}`;
+
+  resumeProgressError.textContent = "";
+  closeGlobalConfirm();
+  resumeProgressBlock.classList.remove("hidden");
+}
+
+function hideResumeCandidate() {
+  resumeCandidate = null;
+  resumeProgressBlock.classList.add("hidden");
+  closeGlobalConfirm();
+  resumeProgressError.textContent = "";
+}
+
+// STEP4/14/15: 画面非依存の共通確認モーダル（resume discard・新規開始競合の両方で使う、複製しない）。
+function openGlobalConfirm(text, onYes, onCancel = () => {}) {
+  globalConfirmError.textContent = "";
+  globalConfirmText.textContent = text;
+  globalConfirmYesAction = onYes;
+  globalConfirmCancelAction = onCancel;
+  globalConfirmModal.classList.remove("hidden");
+}
+
+function closeGlobalConfirm() {
+  globalConfirmModal.classList.add("hidden");
+  globalConfirmYesAction = null;
+  globalConfirmCancelAction = null;
+  globalConfirmError.textContent = "";
+}
+
+// STEP39/40: 連打対策（処理中はボタンをdisabledにする）。
+async function handleGlobalConfirmYesClick() {
+  const action = globalConfirmYesAction;
+  if (!action) return;
+
+  globalConfirmYesButton.disabled = true;
+  globalConfirmCancelButton.disabled = true;
+  try {
+    await action();
+  } finally {
+    globalConfirmYesButton.disabled = false;
+    globalConfirmCancelButton.disabled = false;
+  }
+}
+
+function handleGlobalConfirmCancelClick() {
+  const onCancel = globalConfirmCancelAction;
+  closeGlobalConfirm();
+  onCancel();
+}
+
+function handleResumeDiscardClick() {
+  if (!resumeCandidate) return;
+
+  const candidateAttemptId = resumeCandidate.attemptId;
+  openGlobalConfirm("前回の続きからは再開できなくなります。よろしいですか？", async () => {
+    try {
+      await abandonAttemptProgress(candidateAttemptId);
+    } catch (error) {
+      // STEP16: 失敗時は候補を消したことにしない。
+      console.error("abandonAttemptProgress error:", error);
+      globalConfirmError.textContent = "削除に失敗しました。通信環境を確認して、もう一度お試しください。";
+      return;
+    }
+    closeGlobalConfirm();
+    hideResumeCandidate();
+  });
+}
+
+async function handleResumeContinueClick() {
+  if (!resumeCandidate) return;
+
+  resumeContinueButton.disabled = true;
+  resumeDiscardButton.disabled = true;
+  try {
+    await resumeQuiz(resumeCandidate);
+  } finally {
+    resumeContinueButton.disabled = false;
+    resumeDiscardButton.disabled = false;
+  }
+}
+
+// STEP20-STEP36: 「続きから」本体。新規Attempt/QuestionSetは一切生成せず、
+// progress.attemptIdをそのまま使い回す。questionIds/wrongQuestionIdsの再抽選・
+// 再shuffleは行わない（core/quiz-controller.jsのprepareResumedQuiz参照）。
+async function resumeQuiz(progress) {
+  resumeProgressError.textContent = "";
+  startError.textContent = "";
+
+  const questions = await filterManager.getNormalizedQuestionsForSubject(progress.fieldId);
+  const answerRecords = loadAnswerRecordsByAttempt(progress.attemptId);
+
+  // STEP33: TestSet resumeは、既存loadTestSet()と、生徒選択時に既に復元済みの
+  // Attempt一覧からrunnerStateを再構築してから、通常のprepareResumedQuizへ合流する。
+  if (progress.sourceType === "testset") {
+    let testSetData;
+    try {
+      testSetData = await loadTestSet(progress.testSetId);
+    } catch (error) {
+      console.error("loadTestSet error（resume不可）:", error);
+      resumeProgressError.textContent =
+        "前回の続き（テスト対策）のデータ取得に失敗しました。通信環境を確認して、もう一度お試しください。";
+      return;
+    }
+
+    const priorAttempts = loadAttemptsByStudent(state.session.studentId);
+    const runnerResult = restoreRunnerState({
+      testSet: testSetData.testSet,
+      questions: testSetData.questions,
+      resumeFieldId: progress.fieldId,
+      priorAttempts
+    });
+
+    if (!runnerResult.ok) {
+      resumeProgressError.textContent = runnerResult.errorMessage;
+      return;
+    }
+  }
+
+  const result = prepareResumedQuiz({ state, questions, progress, answerRecords });
+  if (!result.ok) {
+    // STEP21: questionId欠落・境界不正時はresumeを開始しない
+    // （「この続きはやめる」は引き続き利用可能なまま）。
+    resumeProgressError.textContent = result.errorMessage;
+    return;
+  }
+
+  currentDomainAttemptId = progress.attemptId;
+  restoreAttemptProgressContext(progress);
+
+  // 学習記録GASのstartAttempt契約にはtotalCountが含まれない（gas-api-contract-v1.md §5.1）ため、
+  // 復元直後のAttempt.totalCountは常に未確定(0)のままになる（非resumeの通常フローでは、
+  // Attemptオブジェクトが生成時からページ内に残り続けるため顕在化しなかった問題）。
+  // completeAttempt()が誤ったtotalCount=0を送信しないよう、progress.questionIds（開始時点の
+  // 出題数、resumeでも再抽選しない値）から復元する。将来GAS側がtotalCountを返すようになった
+  // 場合に備え、既に正しい値が入っている場合は上書きしない。
+  const restoredAttempt = loadAttempt(progress.attemptId);
+  if (restoredAttempt && !restoredAttempt.totalCount) {
+    saveAttempt({ ...restoredAttempt, totalCount: progress.questionIds.length });
+  }
+
+  hideResumeCandidate();
+
+  backToStartButton.textContent = isRunnerActive() ? "テスト対策へ戻る" : "開始画面へ戻る";
+  showQuizScreen(quizScreen, allScreens);
+
+  // STEP22: currentQuestionIndex===配列長（全問回答済み・次状態遷移直前）の場合は、
+  // 既存goToNextQuestion()の境界判定（retry突入 or 終了）へそのまま委ねる
+  // （新しい分岐を作らず、既存ロジックを完全に再利用する）。
+  if (state.quiz.currentIndex >= state.quiz.quizQuestions.length) {
+    goToNextQuestion();
+  } else {
+    await renderQuestion();
+  }
 }
 
 // Phase5-1: 各画面から「ホームへ戻る」際に、Home画面の統計表示（学習履歴・苦手問題数等）を
@@ -1089,7 +1394,26 @@ function goToTestSetStudentScreen() {
 // QuestionSet/Attemptモデル自体は一切変更せず、既存の単一fieldId実行フロー
 // （startTestSetGroupQuiz→beginAttemptAndShowQuiz、既存startPracticeSessionと同型）を
 // グループの数だけ順番に呼び出す（Task50確定方針）。
+// STEP6: 「このテスト対策を始める」＝TestSet実行の最初の1回だけをresume競合ガードの
+// 対象にする。TestSet実行中の次グループ開始（finishCurrentTestSetGroupAndAdvance→
+// startTestSetGroupQuiz）はこの関数を経由しないため、group1→group2遷移を誤って
+// 「旧resume」と判定することはない。
+//
+// キャンセル時は{ok:true}を返す（test-set-student-controller.jsは ok:true の場合
+// 「成功、画面遷移はapp.js側が行う」とみなして何もしないため、ボタンが再度押せる状態へ
+// 戻るだけで、実際には何も開始されない＝キャンセルの意図どおりの挙動になる）。
+// abandon失敗時は既存のerrorMessage表示経路(tss-confirm-step)へ理由を渡す。
 async function startTestSetFromSelection(selectedTestSet) {
+  return confirmAndAbandonResumeBeforeNewAttempt(() => executeStartTestSetFromSelection(selectedTestSet), {
+    cancelResult: { ok: true },
+    abandonFailResult: {
+      ok: false,
+      errorMessage: "前回の続きの削除に失敗しました。通信環境を確認して、もう一度お試しください。"
+    }
+  });
+}
+
+async function executeStartTestSetFromSelection(selectedTestSet) {
   const result = await startTestSetRun(selectedTestSet, filterManager.getNormalizedQuestionsForSubject);
 
   if (!result.ok) {

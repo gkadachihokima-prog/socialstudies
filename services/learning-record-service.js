@@ -127,6 +127,47 @@ export async function saveAttemptProgress(payload) {
 }
 
 /**
+ * 生徒の再開候補（進行中のAttempt、attempt_progress）を1件取得する（Phase3C本体、GET）。
+ * gas-api-contract-v1.md §5.8参照。
+ *
+ * @param {string} studentId
+ * @returns {Promise<{ok:true, progress:Object|null}>}
+ */
+export async function getAttemptProgress(studentId) {
+  const trimmedStudentId = String(studentId || "").trim();
+
+  if (!trimmedStudentId) {
+    throw new Error("getAttemptProgress: studentIdが空です。");
+  }
+
+  const query = new URLSearchParams({ action: "getAttemptProgress", studentId: trimmedStudentId });
+  const response = await fetch(`${LEARNING_RECORD_GAS_WEB_APP_URL}?${query.toString()}`);
+
+  if (!response.ok) {
+    throw new Error(`HTTP error: ${response.status}`);
+  }
+
+  const result = await response.json();
+
+  if (!result.ok) {
+    throw new Error(result.error || "getAttemptProgress failed");
+  }
+
+  return result;
+}
+
+/**
+ * 途中学習のprogressをresume候補から外す（Phase3C本体、POST）。
+ * gas-api-contract-v1.md §5.9参照。物理削除ではなくstatus=abandonedへの更新のみ。
+ *
+ * @param {string} attemptId
+ * @returns {Promise<{ok:true}>}
+ */
+export async function abandonAttemptProgress(attemptId) {
+  return postToLearningRecordGasWithRetry_("abandonAttemptProgress", { attemptId });
+}
+
+/**
  * 生徒のAttempt/AnswerRecordを学習記録GASから一括取得する（Phase5-4、GET）。
  * gas-api-contract-v1.md §5.4のとおり、GAS側では集計しない生データをそのまま返す。
  * 関数名はfetchStudentLearningRecordsとし、既存features/history/history-service.jsの
