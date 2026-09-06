@@ -283,6 +283,31 @@ export function prepareFixedQuestionSession({ state, questions, answerRecords })
   );
   const unit = units.size === 1 ? [...units][0] : "all";
 
+  return assembleFixedQuestionSession({ state, questions, orderedQuestionIds, fieldId: fieldResult.fieldId, unit });
+}
+
+/**
+ * Phase3D-1/3D-2共通の末尾処理: 確定済みのquestionId順序・fieldId・unitから、
+ * 実際のstate.quiz/state.session構造を組み立てる（CSVからのquestion解決・
+ * 欠落questionIdチェック・state初期化のみを担う。順序・fieldId・unitの「決め方」は
+ * 呼び出し元ごとに異なる＝prepareFixedQuestionSession()はAnswerRecordのanswered At順、
+ * prepareFixedWrongQuestionSession()はAttempt.initialWrongQuestionIdsの保存順、という
+ * 差だけを吸収する。3D-3（1問だけやり直す）を将来追加する場合も、この関数へ
+ * orderedQuestionIds=[questionId]を渡すだけで済む想定）。
+ *
+ * @param {Object} params
+ * @param {import("./state.js").state} params.state
+ * @param {Array<Object>} params.questions - fieldIdの正規化済み問題一覧
+ * @param {string[]} params.orderedQuestionIds - 出題順（既に確定済み、ここで並び替えない）
+ * @param {string} params.fieldId
+ * @param {string} params.unit
+ * @returns {{ok:true, fieldId:string, unit:string}|{ok:false, errorMessage:string}}
+ */
+function assembleFixedQuestionSession({ state, questions, orderedQuestionIds, fieldId, unit }) {
+  if (!Array.isArray(orderedQuestionIds) || orderedQuestionIds.length === 0) {
+    return { ok: false, errorMessage: "この学習にはやり直せる問題がありません。" };
+  }
+
   const questionById = new Map(
     (Array.isArray(questions) ? questions : []).map((question) => [question.questionId, question])
   );
@@ -308,7 +333,7 @@ export function prepareFixedQuestionSession({ state, questions, answerRecords })
   resetQuizState(state);
   resetUiState(state);
 
-  state.session.subject = fieldResult.fieldId;
+  state.session.subject = fieldId;
   state.session.unitFilter = unit;
   state.session.modeFilter = "all";
   state.session.subunitFilter = "all";
@@ -320,5 +345,75 @@ export function prepareFixedQuestionSession({ state, questions, answerRecords })
   state.quiz.wrongQuestions = [];
   state.quiz.score = 0;
 
-  return { ok: true, fieldId: fieldResult.fieldId, unit };
+  return { ok: true, fieldId, unit };
+}
+
+/**
+ * Phase3D-2本体: 「間違えた問題をやり直す」用。学習履歴の完了済みAttemptが持つ
+ * Attempt.initialWrongQuestionIds（そのAttemptの通常ラウンドで一度でも誤答した
+ * 問題のquestionId配列、保存順）をそのまま出題順として使い、新しいstate.quiz/
+ * state.session構造を組み立てる（prepareFixedQuestionSession()と並ぶ、Attempt正本を
+ * 使う版）。
+ *
+ * prepareFixedQuestionSession()との違いはただ1つ: 出題順の決め方。
+ * こちらはAnswerRecordのanswered At（retryで上書きされ得る）から再計算せず、
+ * Attempt.initialWrongQuestionIdsの保存順をそのまま使う（retryで後から正解しても
+ * 対象・順序を変えない、という3D-2の正式仕様のため）。fieldId・unitの決定方法は
+ * prepareFixedQuestionSession()と同じ（対象questionIdに対応するAnswerRecordから導出）。
+ *
+ * @param {Object} params
+ * @param {import("./state.js").state} params.state
+ * @param {Array<Object>} params.questions - fieldIdの正規化済み問題一覧
+ * @param {import("../features/history/attempt-model.js").Attempt} params.attempt - 対象Attempt
+ * @param {Array<{questionId:string, fieldId:string, unit:string}>} params.answerRecords - 対象Attemptの全AnswerRecord
+ * @returns {{ok:true, fieldId:string, unit:string}|{ok:false, errorMessage:string}}
+ */
+export function prepareFixedWrongQuestionSession({ state, questions, attempt, answerRecords }) {
+  const orderedQuestionIds = Array.isArray(attempt?.initialWrongQuestionIds)
+    ? attempt.initialWrongQuestionIds
+    : [];
+
+  if (orderedQuestionIds.length === 0) {
+    return { ok: false, errorMessage: "この学習には、間違えた問題の記録がありません。" };
+  }
+
+  const records = Array.isArray(answerRecords) ? answerRecords : [];
+  const wrongIdSet = new Set(orderedQuestionIds);
+  const wrongRecords = records.filter((record) => wrongIdSet.has(String(record?.questionId || "").trim()));
+
+  const fieldResult = resolveFixedSessionFieldId(wrongRecords);
+  if (!fieldResult.ok) {
+    return fieldResult;
+  }
+
+  const units = new Set(
+    wrongRecords.map((record) => String(record?.unit || "").trim()).filter(Boolean)
+  );
+  const unit = units.size === 1 ? [...units][0] : "all";
+
+  return assembleFixedQuestionSession({ state, questions, orderedQuestionIds, fieldId: fieldResult.fieldId, unit });
+}
+
+/**
+ * Phase3D-2本体: 履歴カードへ「間違えたN問をやり直す」を表示してよいAttemptかどうかを判定する
+ * 純粋関数。history-renderer.js（表示条件）・app.js（直接呼び出し防御）の両方から参照し、
+ * 判定基準を1箇所に保つ。
+ *
+ * 対象: completed===true かつ sourceTypeがretryEligibleSourceTypesに含まれる
+ * （TestSet・未知sourceTypeは対象外）かつ initialWrongQuestionIdsが1件以上の配列
+ * （null・[]は対象外＝情報不明・誤答0件の区別をそのまま尊重する）。
+ *
+ * @param {import("../features/history/attempt-model.js").Attempt} attempt
+ * @param {Set<string>} retryEligibleSourceTypes - 呼び出し元が持つホワイトリスト
+ *   （history-renderer.jsのRETRY_ELIGIBLE_SOURCE_TYPESをそのまま渡す想定、
+ *   本ファイル側で別のリストを新設しない）
+ * @returns {boolean}
+ */
+export function isWrongRetryEligibleAttempt(attempt, retryEligibleSourceTypes) {
+  return Boolean(
+    attempt?.completed === true &&
+      retryEligibleSourceTypes?.has(attempt?.sourceType) &&
+      Array.isArray(attempt?.initialWrongQuestionIds) &&
+      attempt.initialWrongQuestionIds.length > 0
+  );
 }

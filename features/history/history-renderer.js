@@ -22,12 +22,15 @@ import {
   getStudentHistoryList
 } from "./history-service.js";
 import { SUBJECT_CONFIG } from "../../config/subjects.js";
+import { isWrongRetryEligibleAttempt } from "../../core/quiz-controller.js";
 
 const RECENT_HISTORY_LIMIT = 5;
 
 // Phase3D-1: 「もう一度やる」を表示してよいsourceType（TestSet・未知sourceTypeは対象外、
 // 安全側のホワイトリスト方式。新しいsourceTypeを追加する場合はここへ明示的に加える必要がある）。
-const RETRY_ELIGIBLE_SOURCE_TYPES = new Set(["normal", "weak_review", "dormant_review"]);
+// Phase3D-2: 「間違えたN問をやり直す」の対象sourceTypeも同一のため、この1つのSetを共有する
+// （app.js側の直接呼び出し防御にも同じSetをexportして再利用させ、別リストを新設しない）。
+export const RETRY_ELIGIBLE_SOURCE_TYPES = new Set(["normal", "weak_review", "dormant_review"]);
 
 /**
  * @typedef {Object} HistoryScreenElements
@@ -203,11 +206,19 @@ function renderSubjectList(fieldDashboards, listElement) {
  * （安全側、ホワイトリスト方式）。押下時の実処理（questionIds復元・Attempt生成等）は
  * 一切ここで行わず、onRetryAttemptコールバックへ丸ごと委譲する（app.js側の責務）。
  *
+ * Phase3D-2: 上記に加え、isWrongRetryEligibleAttempt()（core/quiz-controller.js）が
+ * trueを返すitemにのみ「間違えたN問をやり直す」ボタンを追加する（Nはattempt.
+ * initialWrongQuestionIds.lengthそのもの。AnswerRecord.isCorrectやwrongQuestionsの
+ * 現在値からは数えない）。判定ロジックはisWrongRetryEligibleAttempt()に一本化し、
+ * ここでは表示条件の分岐を複雑にしない。押下時の実処理はonRetryWrongAttemptコール
+ * バックへ丸ごと委譲する（app.js側の責務、3D-1と同じ構造）。
+ *
  * @param {ReturnType<typeof getStudentHistoryList>["items"]} items
  * @param {HTMLElement} listElement
  * @param {(entry: Object) => void} [onRetryAttempt] - 「もう一度やる」押下時のコールバック
+ * @param {(entry: Object) => void} [onRetryWrongAttempt] - 「間違えたN問をやり直す」押下時のコールバック
  */
-function renderRecentList(items, listElement, onRetryAttempt) {
+function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttempt) {
   listElement.innerHTML = "";
 
   const entries = Array.isArray(items) ? items : [];
@@ -249,13 +260,35 @@ function renderRecentList(items, listElement, onRetryAttempt) {
       RETRY_ELIGIBLE_SOURCE_TYPES.has(entry.attempt?.sourceType) &&
       typeof onRetryAttempt === "function";
 
-    if (isRetryEligible) {
-      const retryButton = document.createElement("button");
-      retryButton.type = "button";
-      retryButton.className = "secondary-button history-recent-item-retry-button";
-      retryButton.textContent = "もう一度やる";
-      retryButton.addEventListener("click", () => onRetryAttempt(entry));
-      item.appendChild(retryButton);
+    const isWrongRetryEligible =
+      isWrongRetryEligibleAttempt(entry.attempt, RETRY_ELIGIBLE_SOURCE_TYPES) &&
+      typeof onRetryWrongAttempt === "function";
+
+    if (isRetryEligible || isWrongRetryEligible) {
+      const actions = document.createElement("div");
+      actions.className = "history-recent-item-actions";
+
+      // Phase3D-2: 誤答復習の方をやや優先し、先に配置する（STEP71）。
+      if (isWrongRetryEligible) {
+        const wrongCount = entry.attempt.initialWrongQuestionIds.length;
+        const retryWrongButton = document.createElement("button");
+        retryWrongButton.type = "button";
+        retryWrongButton.className = "primary-button history-recent-item-retry-wrong-button";
+        retryWrongButton.textContent = `間違えた${wrongCount}問をやり直す`;
+        retryWrongButton.addEventListener("click", () => onRetryWrongAttempt(entry));
+        actions.appendChild(retryWrongButton);
+      }
+
+      if (isRetryEligible) {
+        const retryButton = document.createElement("button");
+        retryButton.type = "button";
+        retryButton.className = "secondary-button history-recent-item-retry-button";
+        retryButton.textContent = "もう一度やる";
+        retryButton.addEventListener("click", () => onRetryAttempt(entry));
+        actions.appendChild(retryButton);
+      }
+
+      item.appendChild(actions);
     }
 
     listElement.appendChild(item);
@@ -269,9 +302,10 @@ function renderRecentList(items, listElement, onRetryAttempt) {
  * @param {string} studentId
  * @param {HistoryScreenElements} elements
  * @param {(entry: Object) => void} [onRetryAttempt] - Phase3D-1「もう一度やる」押下時のコールバック
+ * @param {(entry: Object) => void} [onRetryWrongAttempt] - Phase3D-2「間違えたN問をやり直す」押下時のコールバック
  * @returns {ReturnType<typeof getHistoryScreenData>|null} 取得できたデータ（失敗・履歴無し時はnull）
  */
-export function renderHistoryForStudent(studentId, elements, onRetryAttempt) {
+export function renderHistoryForStudent(studentId, elements, onRetryAttempt, onRetryWrongAttempt) {
   if (!studentId) {
     showHistoryEmptyState(elements);
     return null;
@@ -287,7 +321,7 @@ export function renderHistoryForStudent(studentId, elements, onRetryAttempt) {
 
     renderTier1(elements, data.summary, data.dashboard.overview);
     renderSubjectList(data.fieldDashboards, elements.subjectList);
-    renderRecentList(data.recentHistory.items, elements.recentList, onRetryAttempt);
+    renderRecentList(data.recentHistory.items, elements.recentList, onRetryAttempt, onRetryWrongAttempt);
 
     elements.infoContainer.classList.remove("hidden");
     elements.emptyMessage.classList.add("hidden");

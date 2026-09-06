@@ -904,6 +904,7 @@ select {
 .history-subject-item,
 .history-recent-item {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
@@ -939,9 +940,22 @@ select {
   flex-shrink: 0;
 }
 
+/* Phase3D-2: 「もう一度やる」「間違えたN問をやり直す」の操作群。
+   .history-recent-itemがflex-wrapのため、幅が足りないときはこのdivごと
+   次の行へ折り返る（flex: 1 1 100%で常に1行分の幅を専有させ、date/subject/countの
+   行とactionsの行を綺麗に分離する）。幅が十分な広い画面では同じ行に収まる。 */
+.history-recent-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+
 /* Phase3D-1: 履歴カード内で完結する主操作。行全体を縦長にしないよう、
    quiz-screenの大きい主操作ボタンとは別の、コンパクトだが押しやすいサイズにする。 */
-.history-recent-item .history-recent-item-retry-button {
+.history-recent-item-actions .history-recent-item-retry-button,
+.history-recent-item-actions .history-recent-item-retry-wrong-button {
   width: auto;
   flex-shrink: 0;
   min-height: 44px;

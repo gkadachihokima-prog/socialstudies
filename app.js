@@ -10,7 +10,9 @@ import {
   startRetryWrongRound,
   prepareResumedQuiz,
   resolveFixedSessionFieldId,
-  prepareFixedQuestionSession
+  prepareFixedQuestionSession,
+  prepareFixedWrongQuestionSession,
+  isWrongRetryEligibleAttempt
 } from "./core/quiz-controller.js";
 import { pickQuestions } from "./core/question-picker.js";
 import {
@@ -69,7 +71,7 @@ import { loadTestSet } from "./services/test-set-service.js";
 import { SUBJECT_CONFIG } from "./config/subjects.js";
 import { renderHomeForStudent, toggleHomeDetail } from "./features/home/home-renderer.js";
 import { buildHomePracticeQuiz } from "./features/home/home-practice-controller.js";
-import { renderHistoryForStudent } from "./features/history/history-renderer.js";
+import { renderHistoryForStudent, RETRY_ELIGIBLE_SOURCE_TYPES } from "./features/history/history-renderer.js";
 import { initTeacherScreen } from "./features/teacher/teacher-controller.js";
 import { initTeacherHistorySection } from "./features/teacher/teacher-history-controller.js";
 import { initTestSetStudentScreen, showTestSetCompletion } from "./features/test-set-student/test-set-student-controller.js";
@@ -1441,7 +1443,7 @@ function returnToHome() {
 function goToHistoryScreen() {
   if (!state.session.studentId) return;
 
-  renderHistoryForStudent(state.session.studentId, historyElements, handleHistoryRetryClick);
+  renderHistoryForStudent(state.session.studentId, historyElements, handleHistoryRetryClick, handleHistoryRetryWrongClick);
   showHistoryScreen(historyScreen, allScreens);
 }
 
@@ -1482,6 +1484,54 @@ async function handleHistoryRetryClick(entry) {
     );
   } catch (error) {
     console.error("学習履歴の再挑戦準備でエラーが発生しました（既存の履歴表示には影響しません）:", error);
+    historyError.textContent = "この学習は現在やり直せません。";
+  } finally {
+    historyRetryInProgress = false;
+  }
+}
+
+// Phase3D-2: 学習履歴「間違えたN問をやり直す」。historyRetryInProgressを3D-1と共有し、
+// 「もう一度やる」「間違えたN問をやり直す」いずれかの処理中はもう一方も含めて二重起動しない
+// （履歴画面から一度に1つの新Attemptしか開始できないという既存前提と同じ）。
+// 表示条件（isWrongRetryEligibleAttempt）と同じ判定を、DOM操作等で直接呼ばれた場合に備えて
+// ここでも独立して再検証する（UI非表示だけに頼らない、STEP34/35/37の防御）。
+async function handleHistoryRetryWrongClick(entry) {
+  if (historyRetryInProgress) return;
+  historyRetryInProgress = true;
+  historyError.textContent = "";
+
+  try {
+    const attempt = entry?.attempt;
+
+    if (!isWrongRetryEligibleAttempt(attempt, RETRY_ELIGIBLE_SOURCE_TYPES)) {
+      historyError.textContent = "この学習には、間違えた問題の記録がありません。";
+      return;
+    }
+
+    const answerRecords = Array.isArray(entry?.answerRecords) ? entry.answerRecords : [];
+    const wrongIdSet = new Set(attempt.initialWrongQuestionIds);
+    const wrongRecords = answerRecords.filter((record) => wrongIdSet.has(String(record?.questionId || "").trim()));
+
+    const fieldResult = resolveFixedSessionFieldId(wrongRecords);
+    if (!fieldResult.ok) {
+      historyError.textContent = "この学習は現在やり直せません。";
+      return;
+    }
+
+    const questions = await filterManager.getNormalizedQuestionsForSubject(fieldResult.fieldId);
+    const prepared = prepareFixedWrongQuestionSession({ state, questions, attempt, answerRecords });
+    if (!prepared.ok) {
+      historyError.textContent = prepared.errorMessage;
+      return;
+    }
+
+    // Phase3C: 3D-1と同じ既存の共通ガードをそのまま再利用する（複製しない）。
+    // sourceTypeは元Attemptの値をそのまま引き継ぐ（新sourceTypeは追加しない）。
+    await confirmAndAbandonResumeBeforeNewAttempt(() =>
+      beginAttemptAndShowQuiz(attempt?.sourceType, null, prepared.unit)
+    );
+  } catch (error) {
+    console.error("学習履歴の誤答再挑戦準備でエラーが発生しました（既存の履歴表示には影響しません）:", error);
     historyError.textContent = "この学習は現在やり直せません。";
   } finally {
     historyRetryInProgress = false;
