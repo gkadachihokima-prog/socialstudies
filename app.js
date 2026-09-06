@@ -5,7 +5,13 @@ import {
   resetUiState
 } from "./core/state.js";
 import { normalizeQuestion, buildFallbackQuestionId } from "./core/question-normalizer.js";
-import { prepareQuizStart, startRetryWrongRound, prepareResumedQuiz } from "./core/quiz-controller.js";
+import {
+  prepareQuizStart,
+  startRetryWrongRound,
+  prepareResumedQuiz,
+  resolveFixedSessionFieldId,
+  prepareFixedQuestionSession
+} from "./core/quiz-controller.js";
 import { pickQuestions } from "./core/question-picker.js";
 import {
   buildResultMessage,
@@ -1431,8 +1437,51 @@ function returnToHome() {
 function goToHistoryScreen() {
   if (!state.session.studentId) return;
 
-  renderHistoryForStudent(state.session.studentId, historyElements);
+  renderHistoryForStudent(state.session.studentId, historyElements, handleHistoryRetryClick);
   showHistoryScreen(historyScreen, allScreens);
+}
+
+// Phase3D-1: 学習履歴「もう一度やる」。二重押し防止のための簡易な再入防止フラグ
+// （履歴カードは最大5件のみのため、個別ボタンのdisabled管理までは行わない）。
+let historyRetryInProgress = false;
+
+// STEP38の処理順を守る: 履歴item検証(questionIds復元・fieldId/unit確認含む)→開始可能確定→
+// resume競合confirm→必要ならabandon→新Attempt開始。無効な履歴の再挑戦のために、
+// 有効なresume候補を先に破棄しないよう、検証は競合ガードより必ず前に行う。
+async function handleHistoryRetryClick(entry) {
+  if (historyRetryInProgress) return;
+  historyRetryInProgress = true;
+  historyError.textContent = "";
+
+  try {
+    const attempt = entry?.attempt;
+    const answerRecords = Array.isArray(entry?.answerRecords) ? entry.answerRecords : [];
+
+    const fieldResult = resolveFixedSessionFieldId(answerRecords);
+    if (!fieldResult.ok) {
+      historyError.textContent = "この学習は現在やり直せません。";
+      return;
+    }
+
+    const questions = await filterManager.getNormalizedQuestionsForSubject(fieldResult.fieldId);
+    const prepared = prepareFixedQuestionSession({ state, questions, answerRecords });
+    if (!prepared.ok) {
+      historyError.textContent = prepared.errorMessage;
+      return;
+    }
+
+    // Phase3C: resume候補があれば確認→abandon成功後のみ新規開始する既存の共通ガードを
+    // そのまま再利用する（複製しない）。sourceTypeは元Attemptの値をそのまま引き継ぐ
+    // （新sourceTypeは追加しない）。
+    await confirmAndAbandonResumeBeforeNewAttempt(() =>
+      beginAttemptAndShowQuiz(attempt?.sourceType, null, prepared.unit)
+    );
+  } catch (error) {
+    console.error("学習履歴の再挑戦準備でエラーが発生しました（既存の履歴表示には影響しません）:", error);
+    historyError.textContent = "この学習は現在やり直せません。";
+  } finally {
+    historyRetryInProgress = false;
+  }
 }
 
 // Task53: ホーム画面の「講師用」から、講師用問題選定画面（teacher-screen）へ遷移する。

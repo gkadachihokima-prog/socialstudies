@@ -25,6 +25,10 @@ import { SUBJECT_CONFIG } from "../../config/subjects.js";
 
 const RECENT_HISTORY_LIMIT = 5;
 
+// Phase3D-1: 「もう一度やる」を表示してよいsourceType（TestSet・未知sourceTypeは対象外、
+// 安全側のホワイトリスト方式。新しいsourceTypeを追加する場合はここへ明示的に加える必要がある）。
+const RETRY_ELIGIBLE_SOURCE_TYPES = new Set(["normal", "weak_review", "dormant_review"]);
+
 /**
  * @typedef {Object} HistoryScreenElements
  * @property {HTMLElement} infoContainer - Tier1/Tier2全体のコンテナ
@@ -193,10 +197,17 @@ function renderSubjectList(fieldDashboards, listElement) {
  * （QuestionSetモデルの単一fieldId制約、Task55）、先頭の1件で十分。
  * どちらも取得できない場合のみ、getSubjectLabel()が"不明"を返す。
  *
+ * Phase3D-1: 対象条件（completed===true・answerRecords 1件以上・sourceTypeが
+ * RETRY_ELIGIBLE_SOURCE_TYPESに含まれる）を満たすitemにのみ「もう一度やる」ボタンを追加する。
+ * TestSet（sourceType==="testset"）・未完了Attempt・未知sourceTypeには表示しない
+ * （安全側、ホワイトリスト方式）。押下時の実処理（questionIds復元・Attempt生成等）は
+ * 一切ここで行わず、onRetryAttemptコールバックへ丸ごと委譲する（app.js側の責務）。
+ *
  * @param {ReturnType<typeof getStudentHistoryList>["items"]} items
  * @param {HTMLElement} listElement
+ * @param {(entry: Object) => void} [onRetryAttempt] - 「もう一度やる」押下時のコールバック
  */
-function renderRecentList(items, listElement) {
+function renderRecentList(items, listElement, onRetryAttempt) {
   listElement.innerHTML = "";
 
   const entries = Array.isArray(items) ? items : [];
@@ -231,6 +242,22 @@ function renderRecentList(items, listElement) {
     item.appendChild(date);
     item.appendChild(subject);
     item.appendChild(count);
+
+    const isRetryEligible =
+      entry.attempt?.completed === true &&
+      answeredCount > 0 &&
+      RETRY_ELIGIBLE_SOURCE_TYPES.has(entry.attempt?.sourceType) &&
+      typeof onRetryAttempt === "function";
+
+    if (isRetryEligible) {
+      const retryButton = document.createElement("button");
+      retryButton.type = "button";
+      retryButton.className = "secondary-button history-recent-item-retry-button";
+      retryButton.textContent = "もう一度やる";
+      retryButton.addEventListener("click", () => onRetryAttempt(entry));
+      item.appendChild(retryButton);
+    }
+
     listElement.appendChild(item);
   });
 }
@@ -241,9 +268,10 @@ function renderRecentList(items, listElement) {
  *
  * @param {string} studentId
  * @param {HistoryScreenElements} elements
+ * @param {(entry: Object) => void} [onRetryAttempt] - Phase3D-1「もう一度やる」押下時のコールバック
  * @returns {ReturnType<typeof getHistoryScreenData>|null} 取得できたデータ（失敗・履歴無し時はnull）
  */
-export function renderHistoryForStudent(studentId, elements) {
+export function renderHistoryForStudent(studentId, elements, onRetryAttempt) {
   if (!studentId) {
     showHistoryEmptyState(elements);
     return null;
@@ -259,7 +287,7 @@ export function renderHistoryForStudent(studentId, elements) {
 
     renderTier1(elements, data.summary, data.dashboard.overview);
     renderSubjectList(data.fieldDashboards, elements.subjectList);
-    renderRecentList(data.recentHistory.items, elements.recentList);
+    renderRecentList(data.recentHistory.items, elements.recentList, onRetryAttempt);
 
     elements.infoContainer.classList.remove("hidden");
     elements.emptyMessage.classList.add("hidden");
