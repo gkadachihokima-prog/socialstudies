@@ -915,8 +915,10 @@ function showFinalResult() {
   showResultScreen(resultScreen, allScreens);
 
   // Phase2 Task14-3: 裏側でAttemptを完了状態へ更新する（既存のリザルト表示には影響しない）
+  // Phase3D-2前提: 通常ラウンドの誤答集合（retry開始前のstate.quiz.wrongQuestions）を
+  // ここで抽出して渡す。retry後のAnswerRecordやattempt_progressから逆算しない。
   try {
-    completeAttempt(currentDomainAttemptId);
+    completeAttempt(currentDomainAttemptId, extractQuestionIds(state.quiz.wrongQuestions));
   } catch (domainError) {
     console.error("completeAttempt error（既存のリザルト表示フローには影響しません）:", domainError);
   }
@@ -934,8 +936,10 @@ async function finishCurrentTestSetGroupAndAdvance() {
 
   // Phase2 Task14-3と同じ既存Attempt完了処理。TestSetの各グループも通常学習と同じ
   // Attempt/AnswerRecord経路を通っているため、History/Weaknessは無改修で反映される。
+  // Phase3D-2前提: このgroup（＝このAttempt）のstate.quiz.wrongQuestionsは、次groupの
+  // resetQuizState（startTestSetGroupQuiz内）が呼ばれる前のこの時点でのみ正しい値を保持する。
   try {
-    completeAttempt(currentDomainAttemptId);
+    completeAttempt(currentDomainAttemptId, extractQuestionIds(state.quiz.wrongQuestions));
   } catch (domainError) {
     console.error("completeAttempt error（TestSet実行フローには影響しません）:", domainError);
   }

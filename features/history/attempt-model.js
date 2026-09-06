@@ -34,12 +34,52 @@
  * @property {string|null} sourceType - Attemptの起点（`normal`/`weak_review`/`dormant_review`/`testset`、
  *   Phase5-6で追加。省略時・旧データはnull＝起点不明として扱う。domain-model-v1.md 3.11.1節参照）
  * @property {string|null} testSetId - `sourceType==="testset"`のときのみ値を持つ、それ以外はnull
+ * @property {string[]|null} initialWrongQuestionIds - そのAttemptの通常ラウンド（retryMode===false の間）で
+ *   一度でも isCorrect!==true となった問題のquestionId配列（Phase3D-2前提で追加）。retry結果で書き換えない。
+ *   null＝情報が記録されていない（旧Attempt・GAS側で列が空欄）、[]＝記録済みで誤答0件、を明確に区別する。
  */
 
 import { toTrimmedString, toBooleanFlag, toNullableNumber } from "../common/field-helpers.js";
 import { generateAttemptId } from "../common/id-utils.js";
 import { getQuestionCount } from "../question-set/question-set-model.js";
 import { createAnswerRecord, getAnswerRecordKey } from "./answer-record-model.js";
+
+/**
+ * questionId配列を正規化する（Attempt.initialWrongQuestionIds専用、Phase3D-2前提）。
+ * 非配列・非文字列（undefined/null含む）はnull（情報不明）として扱い、[]や機械的な補完はしない。
+ * 文字列を受け取った場合は、GAS側getStudentHistoryが返す生セル値（JSON配列文字列、または
+ * 未記録を表す空文字列）としてJSON.parseを試みる（不正なJSONもnull＝情報不明として扱い、
+ * 例外は投げない。既存の他フィールド正規化関数と同じ「壊れた入力はnullへ落とす」方針）。
+ * 配列の場合は、trim後に空文字要素を除外し、最初に出現した順序を保持したまま重複を除去する。
+ *
+ * @param {unknown} input
+ * @returns {string[]|null}
+ */
+export function normalizeQuestionIdList(input) {
+  let candidate = input;
+
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (!trimmed) return null;
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (!Array.isArray(candidate)) return null;
+
+  const seen = new Set();
+  const result = [];
+  candidate.forEach((id) => {
+    const trimmedId = toTrimmedString(id);
+    if (!trimmedId || seen.has(trimmedId)) return;
+    seen.add(trimmedId);
+    result.push(trimmedId);
+  });
+  return result;
+}
 
 /**
  * @param {Partial<Attempt>} [input]
@@ -59,7 +99,8 @@ export function createAttempt(input = {}) {
     rawTimeSeconds: toNullableNumber(input.rawTimeSeconds),
     penalizedTimeSeconds: toNullableNumber(input.penalizedTimeSeconds),
     sourceType: input.sourceType ?? null,
-    testSetId: input.testSetId ?? null
+    testSetId: input.testSetId ?? null,
+    initialWrongQuestionIds: normalizeQuestionIdList(input.initialWrongQuestionIds)
   };
 }
 

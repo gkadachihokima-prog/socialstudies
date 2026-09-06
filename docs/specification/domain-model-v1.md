@@ -199,7 +199,7 @@ erDiagram
 |---|---|
 | 役割 | 1回のクイズ実施全体（開始〜完了または途中終了まで） |
 | 一意なID | `attemptId` |
-| 主な属性 | `studentId`, `questionSetId`, `questionSetVersion`, `startedAt`, `completedAt`, `completed`(bool), `score`, `totalCount`, `rawTimeSeconds`, `penalizedTimeSeconds`, `sourceType`（オプション、Phase5-0で追加確定）, `testSetId`（オプション、Phase5-0で追加確定） |
+| 主な属性 | `studentId`, `questionSetId`, `questionSetVersion`, `startedAt`, `completedAt`, `completed`(bool), `score`, `totalCount`, `rawTimeSeconds`, `penalizedTimeSeconds`, `sourceType`（オプション、Phase5-0で追加確定）, `testSetId`（オプション、Phase5-0で追加確定）, `initialWrongQuestionIds`（オプション、Phase3D-2前提で追加確定。3.11.2節参照） |
 | 他概念との関係 | Studentが実施する、AnswerRecordを複数含む、完了時にRankingRecordの更新候補になる |
 | 管理場所 | Attempt/AnswerRecord専用GAS Web App＋専用Google Spreadsheet（新設、Phase5-0確定。既存`saveRecord`のSheetsは拡張しない。9章のTestSet専用GASとは別プロジェクト。詳細は`docs/architecture/ls-total-test-system-design-v1.md` 10.4節） |
 | 更新主体 | 学習アプリ（自動記録） |
@@ -212,6 +212,20 @@ erDiagram
 | `testSetId` | `sourceType="testset"`のときのみ値を持つ。それ以外は`null` |
 
 `schoolId`/`gradeId`/`academicYearId`はAttemptへ重複保存しない。TestSet起点のAttemptについては、`testSetId`からTestSet専用GAS（9章）を逆引きすれば取得できるため、将来TestSet別・学校別分析が必要になった時点で参照する。Phase5-0時点では設計確定のみであり、既存のAttempt生成箇所（`app.js`の`startAttemptForQuiz`呼び出し、`startTestSetGroupQuiz`等）への配線はまだ行っていない（`docs/architecture/ls-total-test-system-design-v1.md` Phase5 Task内訳のPhase5-6で実施予定）。
+
+#### 3.11.2 `initialWrongQuestionIds`（オプション属性、Phase3D-2前提で確定）
+
+| 属性 | 内容 |
+|---|---|
+| `initialWrongQuestionIds` | そのAttemptの通常ラウンド（`retryMode===false`の間）で一度でも`isCorrect!==true`となった問題のquestionId配列（`string[]`）。retry結果で書き換えない。「わからない」も含む。timedOutは現時点で実運用ロジックが存在しないため今回定義しない（Phase7でタイマー実装時に再監査）。 |
+
+3値の意味を明確に区別する: `null`＝情報が記録されていない（旧Attempt、または将来何らかの理由で未記録）、`[]`＝記録済みで通常ラウンドの誤答0件、`["Q2","Q4",...]`＝記録済みの誤答（出現順、重複なし）。**旧データを`[]`やretry後のAnswerRecordから推測復元することはしない。**
+
+生成元は1箇所に固定する: Attempt完了時（`features/history/attempt-complete-integration.js`の`completeAttempt()`）に、その時点で既にメモリ上に存在する`state.quiz.wrongQuestions`（`core/answer-controller.js`が`!retryMode`の間に収集する既存の実行時状態）から抽出するのみ。retry後のAnswerRecordや`attempt_progress.wrongQuestionIds`（3.12.2節）から逆算しない（`attempt_progress.wrongQuestionIds`は`retryWrongEnabled===false`または誤答0件のAttemptでは一度も書き込まれず`[]`のまま残るため、`initialWrongQuestionIds`の情報源として転用できない）。
+
+TestSetの各グループ（＝各Attempt）にも、`sourceType`を問わず同様に保存する。ただしTestSet全体（複数グループ）をまたいだ誤答の統合・「誤答だけ自動周回」は本節の対象外（次工程で別途設計）。
+
+Weakness（`features/weakness/`）・LearningSummary（`docs/operations/learning-summary/LearningSummary.gs`）は、本属性を参照しない（既存どおりAnswerRecord基準を維持する）。Attempt.scoreの算出方法（`completeAttempt()`が最終AnswerRecordから再計算する既存仕様）も変更しない。両者は目的の異なる別概念として併存する。
 
 ### 3.12 AnswerRecord（回答記録）
 

@@ -21,16 +21,22 @@
 import { loadAttempt, saveAttempt } from "./attempt-service.js";
 import { loadAnswerRecordsByAttempt } from "./answer-record-service.js";
 import { syncCompleteAttempt } from "./learning-record-sync-integration.js";
+import { normalizeQuestionIdList } from "./attempt-model.js";
 
 /**
  * クイズ終了時に、裏側でAttemptを完了状態へ更新する。
  * 更新内容: completed, completedAt（終了時刻）, score（正答数）,
- * answeredCount（解答数）, correctRate（正答率）。
+ * answeredCount（解答数）, correctRate（正答率）, initialWrongQuestionIds（Phase3D-2前提で追加）。
+ * 既存のscore/totalCount/sourceType/testSetId等の意味・算出方法は変更しない。
  *
  * @param {string} attemptId - Task14-1で発行済みのAttemptId
+ * @param {string[]} [initialWrongQuestionIds] - そのAttemptの通常ラウンドで一度でも誤答した
+ *   問題のquestionId配列（呼び出し元＝app.jsが、既にメモリ上に存在するstate.quiz.wrongQuestions
+ *   から抽出して渡す。retry後のAnswerRecordやattempt_progressから逆算しない）。省略時はnull
+ *   （情報不明）として保存する。
  * @returns {(import("./attempt-model.js").Attempt & { answeredCount: number, correctRate: number }) | null}
  */
-export function completeAttempt(attemptId) {
+export function completeAttempt(attemptId, initialWrongQuestionIds) {
   try {
     if (!attemptId) return null;
 
@@ -48,7 +54,8 @@ export function completeAttempt(attemptId) {
       completedAt: new Date().toISOString(),
       score: correctCount,
       answeredCount,
-      correctRate
+      correctRate,
+      initialWrongQuestionIds: normalizeQuestionIdList(initialWrongQuestionIds)
     };
 
     const savedAttempt = saveAttempt(completedAttempt);

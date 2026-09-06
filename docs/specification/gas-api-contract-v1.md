@@ -116,9 +116,10 @@
 | 項目 | 内容 |
 |---|---|
 | 目的 | Attemptを完了としてマークする |
-| リクエスト | `POST { action:"completeAttempt", attemptId, completedAt, score, totalCount }` |
+| リクエスト | `POST { action:"completeAttempt", attemptId, completedAt, score, totalCount, initialWrongQuestionIds }` |
 | レスポンス | `{ ok: true }` または `{ ok: false, error }` |
 | 必須項目 | `attemptId`, `completedAt`, `score`, `totalCount` |
+| 任意項目 | `initialWrongQuestionIds`（Phase3D-2前提で追加、本番未反映）: JSON配列文字列、または未記録を表す空文字列。省略（キー自体が無い）も許容し、その場合は空文字列を保存したものとして扱う（旧Webとの互換性のため必須にしない）。非空の場合は空でない一意な文字列の配列であることをJSON.parse後に検証し、不正な場合はエラーとする。詳細は`docs/operations/learning-record-gas/AttemptInitialWrongQuestionIds.gs`参照 |
 | エラー | 該当`attemptId`なし（`startAttempt`未実施）、既に完了済み |
 | 冪等性 | 冪等（同じ`attemptId`への2回目の完了リクエストは何もしない、または同じ結果を返す） |
 | 認証・本人確認 | `startAttempt`時の`studentId`と一致するかの確認が望ましい |

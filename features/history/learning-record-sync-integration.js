@@ -283,7 +283,15 @@ export async function syncCompleteAttempt(completedAttempt) {
         attemptId,
         completedAt: completedAttempt.completedAt,
         score: completedAttempt.score,
-        totalCount: completedAttempt.totalCount
+        totalCount: completedAttempt.totalCount,
+        // Phase3D-2前提: nullは「情報不明」ではなく、この関数ではAttempt完了時に必ず
+        // 実際の配列（空配列を含む）が渡ってくる想定のため、念のためnullのときのみ
+        // 未記録を表す空文字列として送る（attempt_progressのquestionIds/wrongQuestionIdsと
+        // 同じ「配列はJSON文字列化してから送る」規約に合わせる）。
+        initialWrongQuestionIds:
+          completedAttempt.initialWrongQuestionIds === null
+            ? ""
+            : JSON.stringify(completedAttempt.initialWrongQuestionIds)
       });
     });
   } catch (error) {

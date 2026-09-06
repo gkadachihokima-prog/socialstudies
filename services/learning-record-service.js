@@ -105,8 +105,11 @@ export async function saveAnswerRecord(payload) {
 
 /**
  * Attemptを完了状態として学習記録GASへ記録する。
+ * initialWrongQuestionIds（Phase3D-2前提で追加）はJSON配列文字列、または未記録を表す
+ * 空文字列として渡すこと（呼び出し元、features/history/learning-record-sync-integration.jsの責務。
+ * attempt_progressのquestionIds/wrongQuestionIdsと同じ「呼び出し元でJSON文字列化してから渡す」規約）。
  *
- * @param {{attemptId:string, completedAt:string, score:number, totalCount:number}} payload
+ * @param {{attemptId:string, completedAt:string, score:number, totalCount:number, initialWrongQuestionIds?:string}} payload
  * @returns {Promise<{ok:true}>}
  */
 export async function completeAttempt(payload) {

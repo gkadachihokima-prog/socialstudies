@@ -162,10 +162,13 @@ data/
 | `completed` | 完了フラグ（true/false） | 同上 |
 | `score` | 正解数 | 同上 |
 | `totalCount` | 出題数 | 同上 |
+| `initialWrongQuestionIds` | 通常ラウンドで一度でも誤答した問題のquestionId配列（JSON配列文字列。未記録は空文字列） | 3.11.2節（Phase3D-2前提で追加確定・末尾追加・本番未反映） |
 
 主キー: `attemptId`。
 
 **Phase5では追加しない列**: `responseTimeSeconds`, `timedOut`, `rawTimeSeconds`, `penalizedTimeSeconds`等のタイマー・ペナルティ関連列。Phase7（スピードラン＋ランキング）で必要になった時点で追加を検討する。
+
+**`initialWrongQuestionIds`列について（Phase3D-2前提）**: 空文字列＝未記録（旧Attempt、null相当）、`"[]"`＝記録済みで誤答0件、`'["Q2","Q4"]'`のようなJSON配列文字列＝記録済みの誤答、の3状態を区別する。既存行への機械的な値補完はしない。本番反映時は既存の`retryWrongEnabled`列追加（10.3節）と同じ手順（コードdeploy前に本番Spreadsheetへ手動で列を追加）を踏む。詳細は`docs/operations/learning-record-gas/AttemptInitialWrongQuestionIds.gs`参照。
 
 ### 10.2 `answer_records`シート
 
