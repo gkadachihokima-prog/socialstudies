@@ -211,6 +211,15 @@ const teacherHistoryElements = {
 const homeTestSetButton = document.getElementById("home-test-set-button");
 const tssHomeBackButton = document.getElementById("tss-home-back-button");
 
+// STEP5: TestSet専用のresume候補UI要素（sourceType==="testset"のcandidate表示専用、
+// start-screenの#resume-progressとは別要素。既存tssElementsへは混ぜず、
+// resume/discardのapp.js側ロジックだけが直接触るため独立して保持する）。
+const tssResumeBlock = document.getElementById("tss-resume-progress");
+const tssResumeText = document.getElementById("tss-resume-progress-text");
+const tssResumeContinueButton = document.getElementById("tss-resume-continue-button");
+const tssResumeDiscardButton = document.getElementById("tss-resume-discard-button");
+const tssResumeError = document.getElementById("tss-resume-progress-error");
+
 const tssElements = {
   selectStep: document.getElementById("tss-select-step"),
   listStep: document.getElementById("tss-list-step"),
@@ -341,6 +350,8 @@ startHomeBackButton.addEventListener("click", returnToHome);
 startButton.addEventListener("click", startQuiz);
 resumeContinueButton.addEventListener("click", handleResumeContinueClick);
 resumeDiscardButton.addEventListener("click", handleResumeDiscardClick);
+tssResumeContinueButton.addEventListener("click", handleTestSetResumeContinueClick);
+tssResumeDiscardButton.addEventListener("click", handleTestSetResumeDiscardClick);
 globalConfirmYesButton.addEventListener("click", handleGlobalConfirmYesClick);
 globalConfirmCancelButton.addEventListener("click", handleGlobalConfirmCancelClick);
 submitButton.addEventListener("click", handleSubmitButton);
@@ -962,6 +973,13 @@ function backToStart() {
     // initTestSetStudentScreen()が呼ばれるため、school/grade選択・currentIndex・
     // 復習状態等のtssState/runner stateは残らず、次回開始時は必ずphy_001から
     // 新規開始できる（誤操作防止のため毎回リセットする既存方針、Task54と同じ）。
+    //
+    // UI改善: 「テスト対策へ戻る」はabandonAttemptProgressを呼ばない中断であり、
+    // サーバー側progressはin_progressのまま残る（STEP14）。この直後にTestSet画面へ
+    // 戻ってきた場合、更新済みのcurrentQuestionIndexで再度「前回の続きから」を
+    // 表示できるよう、backToStart()の通常quiz分岐と同じくresume候補を取り直す。
+    hideResumeCandidate();
+    fetchResumeCandidateForStartScreen();
     goToTestSetStudentScreen();
     return;
   }
@@ -1178,10 +1196,19 @@ async function fetchResumeCandidateForStartScreen() {
   showResumeCandidate(result.progress);
 }
 
-// STEP10/11/12: resume候補の表示。内部値（sourceType/testSetId等）は表示せず、
+// STEP5/6/10/11/12: resume候補の表示。内部値（sourceType/testSetId等）は表示せず、
 // 既存SUBJECT_CONFIGのlabelのみを使う（新しいlabel mapは作らない）。
+// sourceType==="testset"のcandidateはstart-screenではなくTestSet画面側へのみ出す
+// （同じcandidateを複数画面へ常時表示しないため、STEP6）。
 function showResumeCandidate(progress) {
   resumeCandidate = progress;
+  resumeProgressBlock.classList.add("hidden");
+  tssResumeBlock.classList.add("hidden");
+
+  if (progress.sourceType === "testset") {
+    showTestSetResumeCandidate(progress);
+    return;
+  }
 
   const subjectLabel = SUBJECT_CONFIG[progress.fieldId]?.label || progress.fieldId;
   const unitLabel = progress.unit && progress.unit !== "all" ? ` / ${progress.unit}` : "";
@@ -1192,11 +1219,35 @@ function showResumeCandidate(progress) {
   resumeProgressBlock.classList.remove("hidden");
 }
 
+// STEP5/7: TestSet専用のresume候補表示。TestSet名の解決には、resumeQuiz()のTestSet
+// resumeで既に使っているloadTestSet()をそのまま再利用する（新規API追加なし）。
+// 名称取得に失敗しても、続きから/この続きはやめる自体は利用可能なままにする。
+async function showTestSetResumeCandidate(progress) {
+  tssResumeError.textContent = "";
+  tssResumeText.textContent = "前回のテスト対策の続き";
+  closeGlobalConfirm();
+  tssResumeBlock.classList.remove("hidden");
+
+  if (!progress.testSetId) return;
+
+  try {
+    const { testSet } = await loadTestSet(progress.testSetId);
+    // 表示準備中にresumeCandidateが差し替わっていた場合（生徒切替・discard等）は上書きしない。
+    if (resumeCandidate === progress && testSet?.label) {
+      tssResumeText.textContent = `前回の続き：${testSet.label}`;
+    }
+  } catch (error) {
+    console.error("loadTestSet error（TestSet名の表示のみ失敗、resumeボタン自体は利用可能です）:", error);
+  }
+}
+
 function hideResumeCandidate() {
   resumeCandidate = null;
   resumeProgressBlock.classList.add("hidden");
+  tssResumeBlock.classList.add("hidden");
   closeGlobalConfirm();
   resumeProgressError.textContent = "";
+  tssResumeError.textContent = "";
 }
 
 // STEP4/14/15: 画面非依存の共通確認モーダル（resume discard・新規開始競合の両方で使う、複製しない）。
@@ -1236,7 +1287,9 @@ function handleGlobalConfirmCancelClick() {
   onCancel();
 }
 
-function handleResumeDiscardClick() {
+// start-screen・TestSet画面のどちらの「この続きはやめる」からも共通で使う
+// （STEP9、abandonAttemptProgress経路は複製しない）。errorElementだけ呼び出し元で切り替える。
+function performResumeDiscard(errorElement) {
   if (!resumeCandidate) return;
 
   const candidateAttemptId = resumeCandidate.attemptId;
@@ -1246,7 +1299,7 @@ function handleResumeDiscardClick() {
     } catch (error) {
       // STEP16: 失敗時は候補を消したことにしない。
       console.error("abandonAttemptProgress error:", error);
-      globalConfirmError.textContent = "削除に失敗しました。通信環境を確認して、もう一度お試しください。";
+      errorElement.textContent = "削除に失敗しました。通信環境を確認して、もう一度お試しください。";
       return;
     }
     closeGlobalConfirm();
@@ -1254,17 +1307,33 @@ function handleResumeDiscardClick() {
   });
 }
 
-async function handleResumeContinueClick() {
+function handleResumeDiscardClick() {
+  performResumeDiscard(resumeProgressError);
+}
+
+function handleTestSetResumeDiscardClick() {
+  performResumeDiscard(tssResumeError);
+}
+
+// start-screen・TestSet画面のどちらの「続きから」からも共通で使う
+// （STEP8、resumeQuiz()経路は複製しない）。連打対策のdisable対象ボタンだけ呼び出し元で切り替える。
+async function performResumeContinue(buttonsToDisable) {
   if (!resumeCandidate) return;
 
-  resumeContinueButton.disabled = true;
-  resumeDiscardButton.disabled = true;
+  buttonsToDisable.forEach((button) => { button.disabled = true; });
   try {
     await resumeQuiz(resumeCandidate);
   } finally {
-    resumeContinueButton.disabled = false;
-    resumeDiscardButton.disabled = false;
+    buttonsToDisable.forEach((button) => { button.disabled = false; });
   }
+}
+
+async function handleResumeContinueClick() {
+  await performResumeContinue([resumeContinueButton, resumeDiscardButton]);
+}
+
+async function handleTestSetResumeContinueClick() {
+  await performResumeContinue([tssResumeContinueButton, tssResumeDiscardButton]);
 }
 
 // STEP20-STEP36: 「続きから」本体。新規Attempt/QuestionSetは一切生成せず、

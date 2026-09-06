@@ -235,8 +235,8 @@
         <div id="answer-result" class="result-box"></div>
 
         <div class="button-row">
-          <button id="next-button" class="primary-button" disabled>次へ</button>
           <button id="back-to-start-button" class="secondary-button">開始画面へ戻る</button>
+          <button id="next-button" class="primary-button" disabled>次へ</button>
         </div>
       </div>
     </section>
@@ -382,6 +382,15 @@
     <section id="test-set-student-screen" class="screen">
       <div class="card">
         <h2>学校のテスト対策</h2>
+
+        <div id="tss-resume-progress" class="resume-progress hidden">
+          <p id="tss-resume-progress-text" class="resume-progress-text"></p>
+          <div class="button-row">
+            <button id="tss-resume-continue-button" class="primary-button" type="button">続きから</button>
+            <button id="tss-resume-discard-button" class="secondary-button" type="button">この続きはやめる</button>
+          </div>
+          <p id="tss-resume-progress-error" class="error-message"></p>
+        </div>
 
         <div id="tss-select-step" class="tss-step">
           <div class="form-group">

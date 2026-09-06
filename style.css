@@ -957,31 +957,6 @@ select {
     width: 100%;
   }
 
-  /* 生徒要望対応: quiz-screenの主操作(解答/次へ)を大きく、
-     副操作(開始画面へ戻る)を小さく・視覚的に分離する。
-     #quiz-screenスコープに限定し、home/result/teacher/TestSet等の
-     .primary-button/.secondary-button/.button-rowには影響させない。 */
-  #quiz-screen #submit-button,
-  #quiz-screen #next-button {
-    min-height: 52px;
-    font-size: 1.05rem;
-    padding: 14px 16px;
-  }
-
-  #quiz-screen .button-row {
-    align-items: center;
-  }
-
-  #quiz-screen #back-to-start-button {
-    width: auto;
-    min-width: 160px;
-    min-height: 40px;
-    font-size: 0.85rem;
-    padding: 8px 20px;
-    /* .button-rowのgap(12px)と合わせて合計32px前後の余白になるよう調整 */
-    margin-top: 20px;
-  }
-
   .sort-item {
     flex-direction: column;
     align-items: stretch;
@@ -997,6 +972,46 @@ select {
 
   .teacher-question-row {
     flex-direction: column;
+  }
+}
+
+/* 生徒・教室タブレット要望対応: quiz-screen下部の主操作(次へ)を大きく、
+   副操作(戻る、通常学習/TestSetでラベルが変わる)を小さく左右分離する。
+   スマホ(〜430px級)〜教室タブレット(768〜800px級)まで同じ左右配置とする
+   （@media (max-width: 600px)側のgenericな.button-row列方向スタック・
+   .primary-button/.secondary-buttonのwidth:100%は、home/result/teacher/TestSet等の
+   他画面向けにそのまま維持し、ここでは#quiz-screenスコープのみ上書きする）。 */
+@media (max-width: 1024px) {
+  #quiz-screen #submit-button {
+    min-height: 52px;
+    font-size: 1.05rem;
+    padding: 14px 16px;
+  }
+
+  #quiz-screen .button-row {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  #quiz-screen #back-to-start-button {
+    width: auto;
+    flex: 0 0 auto;
+    min-width: 100px;
+    min-height: 44px;
+    font-size: 0.85rem;
+    padding: 8px 14px;
+    margin-top: 0;
+  }
+
+  #quiz-screen #next-button {
+    width: auto;
+    flex: 1 1 auto;
+    min-height: 55px;
+    font-size: 1.05rem;
+    padding: 14px 16px;
   }
 }
 
