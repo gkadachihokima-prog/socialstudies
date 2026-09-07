@@ -19,6 +19,12 @@ export function createRunnerState() {
     testSetId: "",
     groups: /** @type {TestSetGroup[]} */ ([]),
     currentGroupIndex: -1,
-    results: [] // [{fieldId, correct, total}] グループ完了ごとに追加
+    results: [], // [{fieldId, correct, total, initialWrongQuestionIds}] グループ完了ごとに追加
+    // Phase3D-4B-1: TestSet全group誤答復習（review phase）のための状態。
+    // ここで型を追加するのみで、実際にreview Attemptを開始する配線は3D-4B-2で行う。
+    phase: "groups", // "groups" | "review"
+    reviewGroups: /** @type {TestSetGroup[]} */ ([]),
+    currentReviewIndex: -1,
+    reviewResults: [] // [{fieldId, correct, total, initialWrongQuestionIds}] 復習グループ完了ごとに追加
   };
 }

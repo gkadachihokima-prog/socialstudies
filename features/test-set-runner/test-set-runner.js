@@ -15,6 +15,7 @@
 // 呼び出し側から関数として注入される（テスト容易性・責務分離のため）。
 
 import { createRunnerState } from "./test-set-runner-state.js";
+import { findLatestCompletedAttemptForGroup, buildTestSetReviewGroups } from "./test-set-review-model.js";
 
 let runnerState = createRunnerState();
 
@@ -87,6 +88,7 @@ export async function startTestSetRun(selectedTestSet, getActiveQuestionsForFiel
   }
 
   runnerState = {
+    ...createRunnerState(),
     active: true,
     testSetLabel: String(selectedTestSet.label || ""),
     testSetId: String(selectedTestSet.testSetId || ""),
@@ -129,11 +131,22 @@ export function getCurrentGroup() {
  *
  * @param {number} correct
  * @param {number} total
+ * @param {string[]|null} [initialWrongQuestionIds] - Phase3D-4B-1で追加。
+ *   このグループのAttemptへcompleteAttempt()で渡したのと同じquestionId配列
+ *   （app.js側で別計算しない、既存のextractQuestionIds(state.quiz.wrongQuestions)を
+ *   そのまま渡す想定）。省略時はnull（=情報不明）として記録する。
+ *   3D-4B-1時点ではapp.jsからまだ渡されないため、既存の2引数呼び出しはこれまでどおり
+ *   動作する（常にnullとして記録されるのみで、既存のTestSet実行結果には一切影響しない）。
  */
-export function recordCurrentGroupResult(correct, total) {
+export function recordCurrentGroupResult(correct, total, initialWrongQuestionIds = null) {
   const group = getCurrentGroup();
   if (!group) return;
-  runnerState.results.push({ fieldId: group.fieldId, correct, total });
+  runnerState.results.push({
+    fieldId: group.fieldId,
+    correct,
+    total,
+    initialWrongQuestionIds: Array.isArray(initialWrongQuestionIds) ? [...initialWrongQuestionIds] : null
+  });
 }
 
 /**
@@ -212,28 +225,33 @@ export function restoreRunnerState({ testSet, questions, resumeFieldId, priorAtt
 
   for (let i = 0; i < groupIndex; i += 1) {
     const group = groups[i];
-    const candidates = (Array.isArray(priorAttempts) ? priorAttempts : []).filter((attempt) => {
-      const attemptFieldId = String(attempt?.questionSetId || "").split("__")[0];
-      return (
-        attempt?.sourceType === "testset" &&
-        attempt?.testSetId === testSetId &&
-        attemptFieldId === group.fieldId &&
-        attempt?.completed === true
-      );
+
+    // Phase3D-4B-1: 候補選択ロジック自体はfindLatestCompletedAttemptForGroup()へ
+    // そのまま切り出し済み（test-set-review-model.js）。フィルタ条件・sort比較関数・
+    // tie時の挙動は一切変更していない（Phase3D-4B設計監査STEP34-38で確認済み）。
+    const latest = findLatestCompletedAttemptForGroup(priorAttempts, {
+      sourceType: "testset",
+      testSetId,
+      fieldId: group.fieldId
     });
 
-    if (candidates.length === 0) {
+    if (!latest) {
       return { ok: false, errorMessage: "前回の続きのデータに不整合があります。先生に確認してください。" };
     }
 
-    // 同一fieldIdに複数の完了済みAttemptが存在する場合(通常運用では発生しない想定)は、
-    // 最も新しく完了したものを採用する。
-    candidates.sort((a, b) => (a.completedAt < b.completedAt ? 1 : -1));
-    const latest = candidates[0];
-    results.push({ fieldId: group.fieldId, correct: latest.score, total: latest.totalCount });
+    results.push({
+      fieldId: group.fieldId,
+      correct: latest.score,
+      total: latest.totalCount,
+      // Phase3D-4B-1で追加。復習フェーズ用reviewGroups再構築（3D-4B-3）のために、
+      // resume再構築時もinitialWrongQuestionIdsを保持する（追加GAS呼び出しなし、
+      // 既にpriorAttemptsとして渡されているAttemptオブジェクトから直接取得するのみ）。
+      initialWrongQuestionIds: latest.initialWrongQuestionIds ?? null
+    });
   }
 
   runnerState = {
+    ...createRunnerState(),
     active: true,
     testSetLabel: String(testSet?.label || ""),
     testSetId,
@@ -243,4 +261,95 @@ export function restoreRunnerState({ testSet, questions, resumeFieldId, priorAtt
   };
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Phase3D-4B-1: TestSet全group誤答復習（review phase）の状態管理API。
+//
+// 以下の関数群はまだapp.jsから一切呼ばれない（3D-4B-2で配線するまで、生徒から見える
+// TestSet実行の挙動には影響しない）。runnerStateへ直接代入させず、既存の
+// recordCurrentGroupResult/advanceToNextGroup等と同じ「小さなAPI経由でのみ状態を
+// 変更する」設計を踏襲する。
+// ---------------------------------------------------------------------------
+
+/**
+ * @returns {"groups"|"review"} 現在のTestSet実行フェーズ
+ */
+export function getRunnerPhase() {
+  return runnerState.phase;
+}
+
+/**
+ * @returns {boolean} 復習フェーズを実行中かどうか
+ */
+export function isReviewPhase() {
+  return runnerState.phase === "review";
+}
+
+/**
+ * 現在のrunnerState.results（通常group完了ごとの結果）から復習グループを組み立てる。
+ * runnerState.results自体を外部（app.js）へ生で公開しない代わりに、この関数を経由させる
+ * （既存のrecordCurrentGroupResult/getCurrentGroup等と同じ「小さなAPI経由」の設計を踏襲）。
+ *
+ * @returns {{available:boolean, groups:Array<{fieldId:string, questionIds:string[]}>}}
+ *   test-set-review-model.js の buildTestSetReviewGroups() をそのまま参照。
+ */
+export function buildReviewGroupsFromCurrentResults() {
+  return buildTestSetReviewGroups(runnerState.results);
+}
+
+/**
+ * 復習フェーズを開始する（状態管理のみ。Attemptの生成・quiz画面表示は行わない）。
+ * @param {Array<{fieldId:string, questionIds:string[]}>} reviewGroups
+ */
+export function startReviewPhase(reviewGroups) {
+  const safeGroups = (Array.isArray(reviewGroups) ? reviewGroups : []).map((group) => ({
+    fieldId: group?.fieldId,
+    questionIds: Array.isArray(group?.questionIds) ? [...group.questionIds] : []
+  }));
+
+  runnerState.phase = "review";
+  runnerState.reviewGroups = safeGroups;
+  runnerState.currentReviewIndex = 0;
+  runnerState.reviewResults = [];
+}
+
+/**
+ * @returns {{fieldId:string, questionIds:string[]}|null} 現在実行中の復習グループ
+ */
+export function getCurrentReviewGroup() {
+  return runnerState.reviewGroups[runnerState.currentReviewIndex] || null;
+}
+
+/**
+ * 現在の復習グループの結果を記録する。
+ * @param {number} correct
+ * @param {number} total
+ * @param {string[]|null} [initialWrongQuestionIds] - この復習Attemptで再度間違えた問題
+ *   （＝そのreview Attempt自身のinitialWrongQuestionIds）。
+ */
+export function recordCurrentReviewResult(correct, total, initialWrongQuestionIds = null) {
+  const group = getCurrentReviewGroup();
+  if (!group) return;
+  runnerState.reviewResults.push({
+    fieldId: group.fieldId,
+    correct,
+    total,
+    initialWrongQuestionIds: Array.isArray(initialWrongQuestionIds) ? [...initialWrongQuestionIds] : null
+  });
+}
+
+/**
+ * @returns {boolean} 次の復習グループが残っているか
+ */
+export function hasNextReviewGroup() {
+  return runnerState.currentReviewIndex < runnerState.reviewGroups.length - 1;
+}
+
+/**
+ * @returns {{fieldId:string, questionIds:string[]}|null} 次の復習グループへ進めて返す
+ */
+export function advanceToNextReviewGroup() {
+  runnerState.currentReviewIndex += 1;
+  return getCurrentReviewGroup();
 }
