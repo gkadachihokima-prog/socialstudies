@@ -26,6 +26,10 @@ export function showHistoryScreen(historyScreen, allScreens) {
   showScreen(historyScreen, allScreens);
 }
 
+export function showHistoryDetailScreen(historyDetailScreen, allScreens) {
+  showScreen(historyDetailScreen, allScreens);
+}
+
 export function showTeacherScreen(teacherScreen, allScreens) {
   showScreen(teacherScreen, allScreens);
 }

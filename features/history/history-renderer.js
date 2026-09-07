@@ -45,11 +45,13 @@ export const RETRY_ELIGIBLE_SOURCE_TYPES = new Set(["normal", "weak_review", "do
  * @property {HTMLElement} recentList - 最近の学習履歴の表示先
  */
 
-function getSubjectLabel(fieldId) {
+// Phase3D-3: history-detail-renderer.jsからも同じ表示基準を再利用するためexportする
+// （日付・科目名の表示ロジックを2箇所に分岐させない）。
+export function getSubjectLabel(fieldId) {
   return SUBJECT_CONFIG[fieldId]?.label || fieldId || "不明";
 }
 
-function formatDateLabel(isoTimestamp) {
+export function formatDateLabel(isoTimestamp) {
   if (!isoTimestamp) return "";
   const date = new Date(isoTimestamp);
   if (Number.isNaN(date.getTime())) return "";
@@ -213,12 +215,18 @@ function renderSubjectList(fieldDashboards, listElement) {
  * ここでは表示条件の分岐を複雑にしない。押下時の実処理はonRetryWrongAttemptコール
  * バックへ丸ごと委譲する（app.js側の責務、3D-1と同じ構造）。
  *
+ * Phase3D-3: 上記のretry系ボタンとは独立して、completed===trueかつanswerRecords
+ * 1件以上のitem（sourceTypeを問わない。TestSetも含む＝再挑戦ではなく閲覧のみのため
+ * 対象外にする理由がない）に「詳細」ボタンを追加する。押下時の実処理は
+ * onOpenDetailコールバックへ丸ごと委譲する（app.js側の責務）。
+ *
  * @param {ReturnType<typeof getStudentHistoryList>["items"]} items
  * @param {HTMLElement} listElement
  * @param {(entry: Object) => void} [onRetryAttempt] - 「もう一度やる」押下時のコールバック
  * @param {(entry: Object) => void} [onRetryWrongAttempt] - 「間違えたN問をやり直す」押下時のコールバック
+ * @param {(entry: Object) => void} [onOpenDetail] - 「詳細」押下時のコールバック
  */
-function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttempt) {
+function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttempt, onOpenDetail) {
   listElement.innerHTML = "";
 
   const entries = Array.isArray(items) ? items : [];
@@ -264,7 +272,11 @@ function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttemp
       isWrongRetryEligibleAttempt(entry.attempt, RETRY_ELIGIBLE_SOURCE_TYPES) &&
       typeof onRetryWrongAttempt === "function";
 
-    if (isRetryEligible || isWrongRetryEligible) {
+    // Phase3D-3: sourceTypeを問わない（TestSetも含む。再挑戦ではなく閲覧のみのため）。
+    const isDetailEligible =
+      entry.attempt?.completed === true && answeredCount > 0 && typeof onOpenDetail === "function";
+
+    if (isRetryEligible || isWrongRetryEligible || isDetailEligible) {
       const actions = document.createElement("div");
       actions.className = "history-recent-item-actions";
 
@@ -288,6 +300,17 @@ function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttemp
         actions.appendChild(retryButton);
       }
 
+      // Phase3D-3: 学習開始操作（もう一度やる/間違えたN問をやり直す）より控えめな見た目にし、
+      // 3D-2ボタンとの誤タップを避けるため必ず末尾に配置する（追加監査Q）。
+      if (isDetailEligible) {
+        const detailButton = document.createElement("button");
+        detailButton.type = "button";
+        detailButton.className = "history-recent-item-detail-button";
+        detailButton.textContent = "詳細";
+        detailButton.addEventListener("click", () => onOpenDetail(entry));
+        actions.appendChild(detailButton);
+      }
+
       item.appendChild(actions);
     }
 
@@ -303,9 +326,10 @@ function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttemp
  * @param {HistoryScreenElements} elements
  * @param {(entry: Object) => void} [onRetryAttempt] - Phase3D-1「もう一度やる」押下時のコールバック
  * @param {(entry: Object) => void} [onRetryWrongAttempt] - Phase3D-2「間違えたN問をやり直す」押下時のコールバック
+ * @param {(entry: Object) => void} [onOpenDetail] - Phase3D-3「詳細」押下時のコールバック
  * @returns {ReturnType<typeof getHistoryScreenData>|null} 取得できたデータ（失敗・履歴無し時はnull）
  */
-export function renderHistoryForStudent(studentId, elements, onRetryAttempt, onRetryWrongAttempt) {
+export function renderHistoryForStudent(studentId, elements, onRetryAttempt, onRetryWrongAttempt, onOpenDetail) {
   if (!studentId) {
     showHistoryEmptyState(elements);
     return null;
@@ -321,7 +345,7 @@ export function renderHistoryForStudent(studentId, elements, onRetryAttempt, onR
 
     renderTier1(elements, data.summary, data.dashboard.overview);
     renderSubjectList(data.fieldDashboards, elements.subjectList);
-    renderRecentList(data.recentHistory.items, elements.recentList, onRetryAttempt, onRetryWrongAttempt);
+    renderRecentList(data.recentHistory.items, elements.recentList, onRetryAttempt, onRetryWrongAttempt, onOpenDetail);
 
     elements.infoContainer.classList.remove("hidden");
     elements.emptyMessage.classList.add("hidden");

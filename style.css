@@ -965,6 +965,126 @@ select {
   white-space: nowrap;
 }
 
+/* Phase3D-3: 「詳細」は学習開始操作（もう一度やる/間違えたN問をやり直す）ではないため、
+   意図的に控えめな見た目にする（背景色を持たせず下線のみ、タップ領域はmin-height 44pxを
+   維持しつつ視覚的には主張しない）。誤タップ防止のため常にactions内の末尾に配置される
+   （history-renderer.js側）。 */
+.history-recent-item-actions .history-recent-item-detail-button {
+  width: auto;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  color: #556;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* =========================
+   history-detail-screen (Phase3D-3)
+========================= */
+
+.history-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 0.92rem;
+  color: #445;
+}
+
+.history-detail-summary-note {
+  color: #667;
+  font-size: 0.82rem;
+}
+
+.history-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.history-detail-item {
+  padding: 14px;
+  background: #f7f9fc;
+  border-radius: 10px;
+}
+
+.history-detail-item-number {
+  margin: 0 0 6px;
+  font-weight: bold;
+  color: #2f4d8f;
+}
+
+.history-detail-item-unavailable {
+  margin: 0;
+  color: #667;
+  font-style: italic;
+}
+
+.history-detail-item-question {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+.history-detail-item-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 0 10px;
+  border-radius: 8px;
+}
+
+.history-detail-item-final-answer,
+.history-detail-item-correct-answer {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.history-detail-item-result {
+  margin: 0 0 8px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.history-detail-item-result.correct {
+  color: #2e7d32;
+}
+
+.history-detail-item-result.incorrect {
+  color: #c62828;
+}
+
+.history-detail-item-badge {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fff3e0;
+  color: #b45309;
+  font-size: 0.78rem;
+  font-weight: bold;
+}
+
+.history-detail-item-explanation {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #e0e4ec;
+  font-size: 0.88rem;
+  color: #445;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
 @media (max-width: 600px) {
   .card {
     padding: 18px;

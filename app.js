@@ -30,6 +30,7 @@ import {
   showResultScreen,
   showStartScreen,
   showHistoryScreen,
+  showHistoryDetailScreen,
   showTeacherScreen,
   showTestSetStudentScreen
 } from "./core/screen-controller.js";
@@ -72,6 +73,8 @@ import { SUBJECT_CONFIG } from "./config/subjects.js";
 import { renderHomeForStudent, toggleHomeDetail } from "./features/home/home-renderer.js";
 import { buildHomePracticeQuiz } from "./features/home/home-practice-controller.js";
 import { renderHistoryForStudent, RETRY_ELIGIBLE_SOURCE_TYPES } from "./features/history/history-renderer.js";
+import { getHistoryDetailViewModel } from "./features/history/history-detail-service.js";
+import { renderHistoryDetailScreen, showHistoryDetailError } from "./features/history/history-detail-renderer.js";
 import { initTeacherScreen } from "./features/teacher/teacher-controller.js";
 import { initTeacherHistorySection } from "./features/teacher/teacher-history-controller.js";
 import { initTestSetStudentScreen, showTestSetCompletion } from "./features/test-set-student/test-set-student-controller.js";
@@ -93,6 +96,7 @@ const startScreen = document.getElementById("start-screen");
 const quizScreen = document.getElementById("quiz-screen");
 const resultScreen = document.getElementById("result-screen");
 const historyScreen = document.getElementById("history-screen");
+const historyDetailScreen = document.getElementById("history-detail-screen");
 const teacherScreen = document.getElementById("teacher-screen");
 const testSetStudentScreen = document.getElementById("test-set-student-screen");
 const allScreens = [
@@ -101,6 +105,7 @@ const allScreens = [
   quizScreen,
   resultScreen,
   historyScreen,
+  historyDetailScreen,
   teacherScreen,
   testSetStudentScreen
 ];
@@ -166,6 +171,26 @@ const historyElements = {
   currentStreak: historyCurrentStreak,
   subjectList: historySubjectList,
   recentList: historyRecentList
+};
+
+// Phase3D-3: 学習履歴「詳細」画面（history-detail-screen）のDOM要素。
+// history-detail-renderer.jsはview modelのみを見て描画し、GAS通信・履歴取得・
+// Attempt開始は一切行わない（history-renderer.jsと同じ「取得済みデータ→DOM描画」の位置づけ）。
+const historyDetailDate = document.getElementById("history-detail-date");
+const historyDetailSubject = document.getElementById("history-detail-subject");
+const historyDetailCount = document.getElementById("history-detail-count");
+const historyDetailSourceNote = document.getElementById("history-detail-source-note");
+const historyDetailList = document.getElementById("history-detail-list");
+const historyDetailError = document.getElementById("history-detail-error");
+const historyDetailBackButton = document.getElementById("history-detail-back-button");
+
+const historyDetailElements = {
+  dateLabel: historyDetailDate,
+  subjectLabel: historyDetailSubject,
+  countLabel: historyDetailCount,
+  sourceNote: historyDetailSourceNote,
+  list: historyDetailList,
+  error: historyDetailError
 };
 
 // Task53: 講師用問題選定画面（teacher-screen）のDOM要素。
@@ -346,6 +371,7 @@ homeStartButton.addEventListener("click", goToStartScreenFromHome);
 homeDetailToggle.addEventListener("click", () => toggleHomeDetail(homeElements));
 homeHistoryButton.addEventListener("click", goToHistoryScreen);
 historyBackButton.addEventListener("click", returnToHome);
+historyDetailBackButton.addEventListener("click", returnToHistoryFromDetail);
 
 homeTeacherModeButton.addEventListener("click", goToTeacherScreen);
 teacherBackButton.addEventListener("click", returnToHome);
@@ -1443,8 +1469,43 @@ function returnToHome() {
 function goToHistoryScreen() {
   if (!state.session.studentId) return;
 
-  renderHistoryForStudent(state.session.studentId, historyElements, handleHistoryRetryClick, handleHistoryRetryWrongClick);
+  renderHistoryForStudent(
+    state.session.studentId,
+    historyElements,
+    handleHistoryRetryClick,
+    handleHistoryRetryWrongClick,
+    handleHistoryDetailClick
+  );
   showHistoryScreen(historyScreen, allScreens);
+}
+
+// Phase3D-3: 学習履歴「詳細」画面へ戻る。history-screenは非表示中もDOM上に残ったまま
+// （core/screen-controller.jsのdisplay:none/block切り替えのみ、要素は破棄されない）ため、
+// 履歴一覧を再取得・再描画しない（追加監査D/E：スクロール位置・DOMともに自然に保持される）。
+function returnToHistoryFromDetail() {
+  showHistoryScreen(historyScreen, allScreens);
+}
+
+// Phase3D-3: 学習履歴「詳細」。二重押し防止のための簡易な再入防止フラグ
+// （3D-1/3D-2のhistoryRetryInProgressとは別。詳細表示は新Attemptを作らない読み取り専用の
+// ため、共有ガードを再利用する必要はない）。
+let historyDetailLoadInProgress = false;
+
+async function handleHistoryDetailClick(entry) {
+  if (historyDetailLoadInProgress) return;
+  historyDetailLoadInProgress = true;
+
+  try {
+    const viewModel = await getHistoryDetailViewModel(entry);
+    renderHistoryDetailScreen(viewModel, historyDetailElements);
+    showHistoryDetailScreen(historyDetailScreen, allScreens);
+  } catch (error) {
+    console.error("学習履歴の詳細取得でエラーが発生しました（既存の履歴表示には影響しません）:", error);
+    showHistoryDetailError(historyDetailElements, "この学習履歴の詳細を表示できませんでした。");
+    showHistoryDetailScreen(historyDetailScreen, allScreens);
+  } finally {
+    historyDetailLoadInProgress = false;
+  }
 }
 
 // Phase3D-1: 学習履歴「もう一度やる」。二重押し防止のための簡易な再入防止フラグ
