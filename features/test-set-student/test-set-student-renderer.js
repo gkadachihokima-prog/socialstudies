@@ -84,8 +84,12 @@ export function renderConfirmInfo(containerEl, data) {
 
 /**
  * TestSet全体完了時のサマリー表示を組み立てる（Task55）。
+ * Phase3D-4B-3: summary.reviewが存在する場合のみ、間違い直し結果を追加表示する
+ * （既存の問題数/正解数/不正解数の3行はreviewの有無に関わらず常に初回結果のまま、
+ * Phase3D-4B設計監査「summary score意味」の結論どおり初回とreviewの点数を加算しない）。
  * @param {HTMLElement} containerEl
- * @param {{label:string, totalQuestions:number, totalCorrect:number, totalIncorrect:number}} summary
+ * @param {{label:string, totalQuestions:number, totalCorrect:number, totalIncorrect:number,
+ *   review?: {totalQuestions:number, totalCorrect:number, totalIncorrect:number, remainingWrong:number}|null}} summary
  */
 export function renderCompletionSummary(containerEl, summary) {
   containerEl.innerHTML = "";
@@ -101,6 +105,13 @@ export function renderCompletionSummary(containerEl, summary) {
     ["不正解数", `${summary.totalIncorrect}問`]
   ];
 
+  if (summary.review) {
+    rows.push(["間違い直し", `${summary.review.totalCorrect} / ${summary.review.totalQuestions}問`]);
+    if (summary.review.remainingWrong > 0) {
+      rows.push(["まだ確認が必要", `${summary.review.remainingWrong}問`]);
+    }
+  }
+
   rows.forEach(([label, value]) => {
     const row = document.createElement("p");
     row.className = "tss-confirm-row";
@@ -108,6 +119,13 @@ export function renderCompletionSummary(containerEl, summary) {
     row.querySelector(".tss-confirm-row-value").textContent = value;
     containerEl.appendChild(row);
   });
+
+  if (summary.review && summary.review.remainingWrong === 0) {
+    const note = document.createElement("p");
+    note.className = "tss-confirm-message";
+    note.textContent = "間違い直しは全問正解でした";
+    containerEl.appendChild(note);
+  }
 }
 
 /**

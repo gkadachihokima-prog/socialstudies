@@ -78,6 +78,7 @@ import { renderHistoryDetailScreen, showHistoryDetailError } from "./features/hi
 import { initTeacherScreen } from "./features/teacher/teacher-controller.js";
 import { initTeacherHistorySection } from "./features/teacher/teacher-history-controller.js";
 import { initTestSetStudentScreen, showTestSetCompletion } from "./features/test-set-student/test-set-student-controller.js";
+import { showTssError } from "./features/test-set-student/test-set-student-renderer.js";
 import {
   startTestSetRun,
   isRunnerActive,
@@ -88,8 +89,20 @@ import {
   advanceToNextGroup,
   finishRun,
   abortRun,
-  restoreRunnerState
+  restoreRunnerState,
+  isReviewPhase,
+  buildReviewGroupsFromCurrentResults,
+  validateReviewGroups,
+  startReviewPhase,
+  getCurrentReviewGroup,
+  recordCurrentReviewResult,
+  hasNextReviewGroup,
+  advanceToNextReviewGroup,
+  finishReviewRun,
+  restoreReviewRunnerState
 } from "./features/test-set-runner/test-set-runner.js";
+import { getReviewQuestionCount } from "./features/test-set-runner/test-set-review-model.js";
+import { prepareTestSetReviewResumePlan } from "./features/test-set-runner/test-set-review-resume.js";
 
 const homeScreen = document.getElementById("home-screen");
 const startScreen = document.getElementById("start-screen");
@@ -270,6 +283,13 @@ const tssElements = {
   completeInfo: document.getElementById("tss-complete-info")
 };
 
+// Phase3D-4B-2: TestSet全group誤答復習（review phase）の開始案内。
+// 復習Attemptは案内表示より前に既に開始済みであり、このoverlayは一度きりの
+// 情報提示にすぎない（閉じてもAttempt/progressには一切影響しない）。
+const reviewStartBanner = document.getElementById("review-start-banner");
+const reviewStartBannerText = document.getElementById("review-start-banner-text");
+const reviewStartBannerCloseButton = document.getElementById("review-start-banner-close-button");
+
 // Phase2 Task21-3: 「苦手を復習」「復習する」ボタン押下時に呼ばれるコールバック。
 // home-renderer.js はこれらの中身（Bridge呼び出し・クイズ開始）を一切知らない。
 const homePracticeCallbacks = {
@@ -378,6 +398,8 @@ teacherBackButton.addEventListener("click", returnToHome);
 
 homeTestSetButton.addEventListener("click", goToTestSetStudentScreen);
 tssHomeBackButton.addEventListener("click", returnToHome);
+
+reviewStartBannerCloseButton.addEventListener("click", hideReviewStartBanner);
 
 startHomeBackButton.addEventListener("click", returnToHome);
 
@@ -929,6 +951,13 @@ function showFinalResult() {
   // （通常学習のresult-screen・retry/wrong-retryボタンはTestSet実行中は一切使わない、
   // Task55確定方針）。既存Attempt完了処理（completeAttempt）は各グループとも通常学習と
   // 全く同じ経路をそのまま通す。
+  // Phase3D-4B-2: TestSet内の現在工程（通常group/復習）はsourceType文字列ではなく
+  // runner phase（isReviewPhase()）を正本として分岐する（runner stateがTestSet内の
+  // 現在工程を表すため、Phase3D-4B設計監査STEP48の結論どおり）。
+  if (isRunnerActive() && isReviewPhase()) {
+    finishCurrentTestSetReviewGroupAndAdvance();
+    return;
+  }
   if (isRunnerActive()) {
     finishCurrentTestSetGroupAndAdvance();
     return;
@@ -960,14 +989,17 @@ function showFinalResult() {
 async function finishCurrentTestSetGroupAndAdvance() {
   const groupCorrect = state.quiz.retryMode ? state.quiz.firstRoundScore : state.quiz.score;
   const groupTotal = state.quiz.retryMode ? state.quiz.firstRoundTotal : state.quiz.quizQuestions.length;
-  recordCurrentGroupResult(groupCorrect, groupTotal);
+  // Phase3D-2前提: このgroup（＝このAttempt）のstate.quiz.wrongQuestionsは、次groupの
+  // resetQuizState（startTestSetGroupQuiz内）が呼ばれる前のこの時点でのみ正しい値を保持する。
+  // Phase3D-4B-2: 同じ配列をrecordCurrentGroupResult（runner result）とcompleteAttempt
+  // （Attempt保存）の両方へ渡す（二重計算しない、Phase3D-4B設計監査STEP16の結論どおり）。
+  const initialWrongQuestionIds = extractQuestionIds(state.quiz.wrongQuestions);
+  recordCurrentGroupResult(groupCorrect, groupTotal, initialWrongQuestionIds);
 
   // Phase2 Task14-3と同じ既存Attempt完了処理。TestSetの各グループも通常学習と同じ
   // Attempt/AnswerRecord経路を通っているため、History/Weaknessは無改修で反映される。
-  // Phase3D-2前提: このgroup（＝このAttempt）のstate.quiz.wrongQuestionsは、次groupの
-  // resetQuizState（startTestSetGroupQuiz内）が呼ばれる前のこの時点でのみ正しい値を保持する。
   try {
-    completeAttempt(currentDomainAttemptId, extractQuestionIds(state.quiz.wrongQuestions));
+    completeAttempt(currentDomainAttemptId, initialWrongQuestionIds);
   } catch (domainError) {
     console.error("completeAttempt error（TestSet実行フローには影響しません）:", domainError);
   }
@@ -978,9 +1010,115 @@ async function finishCurrentTestSetGroupAndAdvance() {
     return;
   }
 
-  const summary = finishRun();
+  // Phase3D-4B-2: 全通常group完了時のみ、誤答復習フェーズへの分岐を判定する。
+  // available=false（旧Attempt等でinitialWrongQuestionIdsが不明なgroupが混在）の場合は、
+  // 復習対象を正確に特定できないため復習を自動生成せず、既存の完了経路へフォールバックする
+  // （アプリ異常として扱わない、Phase3D-4B設計監査「old Attempt unavailable」の結論どおり）。
+  const review = buildReviewGroupsFromCurrentResults();
+
+  if (!review.available || review.groups.length === 0) {
+    const summary = finishRun();
+    showTestSetCompletion(tssElements, summary);
+    showTestSetStudentScreen(testSetStudentScreen, allScreens);
+    return;
+  }
+
+  // Phase3D-4B-2: 復習フェーズ全体（全fieldIdのquestionIds）を、最初のreview Attemptを
+  // 開始する前に一括検証する。1件でも問題データに不整合があれば、部分的に復習を開始せず
+  // 安全側（既存TestSet画面へ戻す）へ倒す（Phase3D-4B設計監査「preflight全体」の結論どおり）。
+  const preflight = await validateReviewGroups(review.groups, filterManager.getNormalizedQuestionsForSubject);
+
+  if (!preflight.ok) {
+    console.error("復習フェーズの開始に失敗（通常TestSetの結果には影響しません）:", preflight.errorMessage);
+    abortRun();
+    goToTestSetStudentScreen();
+    showTssError(tssElements.selectError, "間違い直しの問題を準備できませんでした。テスト対策画面からもう一度お試しください。");
+    return;
+  }
+
+  startReviewPhase(review.groups);
+  await startTestSetReviewGroup();
+  // Phase3D-4B-2: 案内は最初のreview Attempt開始・quiz画面表示後に一度だけ表示する
+  // （review2以降では表示しない、Phase3D-4B設計監査STEP45/187の結論どおり）。
+  showReviewStartBanner(getReviewQuestionCount(review.groups));
+}
+
+// Phase3D-4B-2: TestSetの1復習グループ（単一fieldId、そのfieldIdの誤答questionIdsのみ）分の
+// Quizを開始する。既存startTestSetGroupQuiz()と同じ構造（固定questionIdsをactiveな問題一覧から
+// 抽出→stateへ直接設定→beginAttemptAndShowQuiz）を踏襲し、sourceTypeのみ"testset_review"にする。
+// 現在の復習グループはrunner側（getCurrentReviewGroup）から取得する（startTestSetGroupQuizと
+// 異なり引数を取らない、Phase3D-4B設計監査STEP25の設計どおり）。
+async function startTestSetReviewGroup() {
+  const group = getCurrentReviewGroup();
+
+  if (!group) {
+    // 通常到達しない安全側フォールバック（reviewGroupsが空でstartReviewPhaseを呼んだ場合等）。
+    console.error("startTestSetReviewGroup: 現在の復習グループを取得できません（TestSet実行フローには影響しません）。");
+    const summary = finishReviewRun();
+    showTestSetCompletion(tssElements, summary);
+    showTestSetStudentScreen(testSetStudentScreen, allScreens);
+    return;
+  }
+
+  const availableQuestions = await filterManager.getNormalizedQuestionsForSubject(group.fieldId);
+  const matched = availableQuestions.filter((q) => group.questionIds.includes(q.questionId));
+
+  state.session.subject = group.fieldId;
+  state.session.unitFilter = "all";
+  state.session.modeFilter = "all";
+  state.session.subunitFilter = "all";
+  state.session.requestedQuestionCount = matched.length;
+  // 通常TestSet groupと同じ安全策（2026-08-30確定方針）。復習は1巡のみで、
+  // 再誤答してもその場で再々出題しない（Phase3D-4B設計監査「review回数」の結論どおり）。
+  state.session.retryWrongEnabled = false;
+
+  resetQuizState(state);
+  resetUiState(state);
+
+  state.quiz.allQuestions = matched;
+  state.quiz.quizQuestions = pickQuestions(matched, matched.length);
+
+  await beginAttemptAndShowQuiz("testset_review", getRunnerTestSetId(), state.session.unitFilter);
+}
+
+// Phase3D-4B-2: 復習グループ完了時の結果記録・次復習グループへの遷移。
+// 既存finishCurrentTestSetGroupAndAdvance()と責務・順序を揃える（Phase3D-4B設計監査STEP49）。
+async function finishCurrentTestSetReviewGroupAndAdvance() {
+  const reviewCorrect = state.quiz.retryMode ? state.quiz.firstRoundScore : state.quiz.score;
+  const reviewTotal = state.quiz.retryMode ? state.quiz.firstRoundTotal : state.quiz.quizQuestions.length;
+  // このreview Attempt自身の再誤答（＝「復習後も確認が必要」の正本、Phase3D-4A契約どおり）。
+  const initialWrongQuestionIds = extractQuestionIds(state.quiz.wrongQuestions);
+  recordCurrentReviewResult(reviewCorrect, reviewTotal, initialWrongQuestionIds);
+
+  try {
+    completeAttempt(currentDomainAttemptId, initialWrongQuestionIds);
+  } catch (domainError) {
+    console.error("completeAttempt error（TestSet復習フローには影響しません）:", domainError);
+  }
+
+  if (hasNextReviewGroup()) {
+    advanceToNextReviewGroup();
+    await startTestSetReviewGroup();
+    return;
+  }
+
+  // Phase3D-4B-3で最終summary UIを拡張するまでは、既存completion screenへ安全に着地する
+  // （summary.reviewは内部的に含まれるが、既存renderCompletionSummaryは未知のキーを
+  // 参照しないため無視される、Phase3D-4B設計監査STEP62で実コード確認済み）。
+  const summary = finishReviewRun();
   showTestSetCompletion(tssElements, summary);
   showTestSetStudentScreen(testSetStudentScreen, allScreens);
+}
+
+// Phase3D-4B-2: 復習開始案内（一度きり）。Attempt/progressは表示前に既に開始済みのため、
+// このoverlayを閉じてもreview Attemptには一切影響しない。
+function showReviewStartBanner(questionCount) {
+  reviewStartBannerText.textContent = `全問題が終わりました。間違えた${questionCount}問を復習しましょう。`;
+  reviewStartBanner.classList.remove("hidden");
+}
+
+function hideReviewStartBanner() {
+  reviewStartBanner.classList.add("hidden");
 }
 
 function retryQuiz() {
@@ -1248,6 +1386,15 @@ function showResumeCandidate(progress) {
     return;
   }
 
+  // Phase3D-4B-3: testset_reviewは通常testsetと同じ「TestSet由来」だが、resume処理は
+  // 別物（restoreRunnerStateではなくrestoreReviewRunnerStateを使う）ため専用分岐とする
+  // （sourceType==="testset" || sourceType==="testset_review" への機械的な一括統合は行わない、
+  // Phase3D-4B設計監査STEP207/386の結論どおり）。
+  if (progress.sourceType === "testset_review") {
+    showTestSetReviewResumeCandidate(progress);
+    return;
+  }
+
   const subjectLabel = SUBJECT_CONFIG[progress.fieldId]?.label || progress.fieldId;
   const unitLabel = progress.unit && progress.unit !== "all" ? ` / ${progress.unit}` : "";
   resumeProgressText.textContent = `前回の続き：${subjectLabel}${unitLabel}`;
@@ -1273,6 +1420,27 @@ async function showTestSetResumeCandidate(progress) {
     // 表示準備中にresumeCandidateが差し替わっていた場合（生徒切替・discard等）は上書きしない。
     if (resumeCandidate === progress && testSet?.label) {
       tssResumeText.textContent = `前回の続き：${testSet.label}`;
+    }
+  } catch (error) {
+    console.error("loadTestSet error（TestSet名の表示のみ失敗、resumeボタン自体は利用可能です）:", error);
+  }
+}
+
+// Phase3D-4B-3: testset_review専用のresume候補表示。既存showTestSetResumeCandidate()と
+// 同じ#tss-resume-progressを再利用し（新しいresume panelを増やさない）、文言のみ
+// 「間違い直しの続き」に変える。TestSet名の解決はloadTestSet()を同様に再利用する。
+async function showTestSetReviewResumeCandidate(progress) {
+  tssResumeError.textContent = "";
+  tssResumeText.textContent = "前回の間違い直しの続き";
+  closeGlobalConfirm();
+  tssResumeBlock.classList.remove("hidden");
+
+  if (!progress.testSetId) return;
+
+  try {
+    const { testSet } = await loadTestSet(progress.testSetId);
+    if (resumeCandidate === progress && testSet?.label) {
+      tssResumeText.textContent = `${testSet.label} の間違い直しの続き`;
     }
   } catch (error) {
     console.error("loadTestSet error（TestSet名の表示のみ失敗、resumeボタン自体は利用可能です）:", error);
@@ -1374,11 +1542,24 @@ async function handleTestSetResumeContinueClick() {
   await performResumeContinue([tssResumeContinueButton, tssResumeDiscardButton]);
 }
 
+// Phase3D-4B-3: resume候補の表示先（#resume-progress / #tss-resume-progress）に応じて、
+// エラー表示先も揃える。testset/testset_reviewはいずれも#tss-resume-progress側にのみ
+// 候補が出るため、そちらのエラー要素へ表示する（従来のtestsetブランチがresumeProgressError
+// （start-screen側、表示されない）へ書いていた既存の表示不備も、この判定を共通化することで
+// 合わせて解消する）。
+function getResumeErrorElement(progress) {
+  return progress?.sourceType === "testset" || progress?.sourceType === "testset_review"
+    ? tssResumeError
+    : resumeProgressError;
+}
+
 // STEP20-STEP36: 「続きから」本体。新規Attempt/QuestionSetは一切生成せず、
 // progress.attemptIdをそのまま使い回す。questionIds/wrongQuestionIdsの再抽選・
 // 再shuffleは行わない（core/quiz-controller.jsのprepareResumedQuiz参照）。
 async function resumeQuiz(progress) {
+  const resumeErrorElement = getResumeErrorElement(progress);
   resumeProgressError.textContent = "";
+  tssResumeError.textContent = "";
   startError.textContent = "";
 
   const questions = await filterManager.getNormalizedQuestionsForSubject(progress.fieldId);
@@ -1392,7 +1573,7 @@ async function resumeQuiz(progress) {
       testSetData = await loadTestSet(progress.testSetId);
     } catch (error) {
       console.error("loadTestSet error（resume不可）:", error);
-      resumeProgressError.textContent =
+      resumeErrorElement.textContent =
         "前回の続き（テスト対策）のデータ取得に失敗しました。通信環境を確認して、もう一度お試しください。";
       return;
     }
@@ -1406,16 +1587,46 @@ async function resumeQuiz(progress) {
     });
 
     if (!runnerResult.ok) {
-      resumeProgressError.textContent = runnerResult.errorMessage;
+      resumeErrorElement.textContent = runnerResult.errorMessage;
       return;
     }
+  } else if (progress.sourceType === "testset_review") {
+    // Phase3D-4B-3: review resumeは既存restoreRunnerStateを使わず、専用のpure検証関数
+    // （prepareTestSetReviewResumePlan、features/test-set-runner/test-set-review-resume.js）で
+    // 通常group結果の復元・reviewGroups再生成・progressとの照合・過去run混入抑制まで
+    // 完全に検証してから、restoreReviewRunnerStateで一括してrunnerStateへ反映する
+    // （検証途中で失敗した場合、runnerStateには一切触れない＝half-restored stateを作らない）。
+    let testSetData;
+    try {
+      testSetData = await loadTestSet(progress.testSetId);
+    } catch (error) {
+      console.error("loadTestSet error（resume不可）:", error);
+      resumeErrorElement.textContent =
+        "前回の間違い直しの続きのデータ取得に失敗しました。通信環境を確認して、もう一度お試しください。";
+      return;
+    }
+
+    const priorAttempts = loadAttemptsByStudent(state.session.studentId);
+    const plan = prepareTestSetReviewResumePlan({
+      testSet: testSetData.testSet,
+      questions: testSetData.questions,
+      progress,
+      priorAttempts
+    });
+
+    if (!plan.ok) {
+      resumeErrorElement.textContent = plan.errorMessage;
+      return;
+    }
+
+    restoreReviewRunnerState(plan.runnerData);
   }
 
   const result = prepareResumedQuiz({ state, questions, progress, answerRecords });
   if (!result.ok) {
     // STEP21: questionId欠落・境界不正時はresumeを開始しない
     // （「この続きはやめる」は引き続き利用可能なまま）。
-    resumeProgressError.textContent = result.errorMessage;
+    resumeErrorElement.textContent = result.errorMessage;
     return;
   }
 

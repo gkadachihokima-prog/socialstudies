@@ -462,6 +462,17 @@
         </div>
       </div>
     </div>
+
+    <!-- Phase3D-4B-2: TestSet全group誤答復習の開始案内。既存global-confirm-modalと
+         同じCSSクラスを再利用し、新規CSSを追加しない（案内のみでYes/Cancel判断は不要）。 -->
+    <div id="review-start-banner" class="global-confirm-modal hidden">
+      <div class="global-confirm-card">
+        <p id="review-start-banner-text" class="global-confirm-text"></p>
+        <div class="button-row">
+          <button id="review-start-banner-close-button" class="primary-button" type="button">問題を見る</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="app.js"></script>

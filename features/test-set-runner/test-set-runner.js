@@ -15,7 +15,11 @@
 // 呼び出し側から関数として注入される（テスト容易性・責務分離のため）。
 
 import { createRunnerState } from "./test-set-runner-state.js";
-import { findLatestCompletedAttemptForGroup, buildTestSetReviewGroups } from "./test-set-review-model.js";
+import {
+  findLatestCompletedAttemptForGroup,
+  buildTestSetReviewGroups,
+  computeReviewCompletionSummary
+} from "./test-set-review-model.js";
 
 let runnerState = createRunnerState();
 
@@ -27,7 +31,7 @@ let runnerState = createRunnerState();
  * @param {Array<{fieldId:string, questionId:string}>} questions
  * @returns {Array<{fieldId:string, questionIds:string[]}>}
  */
-function groupQuestionsByField(questions) {
+export function groupQuestionsByField(questions) {
   const order = [];
   const map = new Map();
 
@@ -263,6 +267,50 @@ export function restoreRunnerState({ testSet, questions, resumeFieldId, priorAtt
   return { ok: true };
 }
 
+/**
+ * Phase3D-4B-3: ページリロード等でrunnerStateが失われた状態から、resume対象progress
+ * （sourceType==="testset_review"）をもとに復習フェーズの進行状態を再構築する。
+ *
+ * 検証・整合性チェック（通常group結果の復元、reviewGroups再生成、progressとの照合、
+ * 過去run混入抑制のための時間窓判定等）はすべて呼び出し側（features/test-set-runner/
+ * test-set-review-resume.js の prepareTestSetReviewResumePlan()）が既に完了した
+ * plain dataを受け取るだけの単純な状態設定のみを行う（履歴検索・DOM操作・GAS通信はしない）。
+ *
+ * @param {Object} runnerData
+ * @param {string} runnerData.testSetLabel
+ * @param {string} runnerData.testSetId
+ * @param {Array<{fieldId:string, questionIds:string[]}>} runnerData.groups
+ * @param {number} runnerData.currentGroupIndex
+ * @param {Array<{fieldId:string, correct:number, total:number, initialWrongQuestionIds:string[]|null}>} runnerData.results
+ * @param {Array<{fieldId:string, questionIds:string[]}>} runnerData.reviewGroups
+ * @param {number} runnerData.currentReviewIndex
+ * @param {Array<{fieldId:string, correct:number, total:number, initialWrongQuestionIds:string[]|null}>} runnerData.reviewResults
+ */
+export function restoreReviewRunnerState({
+  testSetLabel,
+  testSetId,
+  groups,
+  currentGroupIndex,
+  results,
+  reviewGroups,
+  currentReviewIndex,
+  reviewResults
+}) {
+  runnerState = {
+    ...createRunnerState(),
+    active: true,
+    phase: "review",
+    testSetLabel,
+    testSetId,
+    groups,
+    currentGroupIndex,
+    results,
+    reviewGroups,
+    currentReviewIndex,
+    reviewResults
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Phase3D-4B-1: TestSet全group誤答復習（review phase）の状態管理API。
 //
@@ -352,4 +400,57 @@ export function hasNextReviewGroup() {
 export function advanceToNextReviewGroup() {
   runnerState.currentReviewIndex += 1;
   return getCurrentReviewGroup();
+}
+
+/**
+ * Phase3D-4B-2: 復習フェーズのreviewGroups全体を、最初のreview Attempt開始前に
+ * 一括検証する。startTestSetRun()の既存検証ロジック（fieldIdごとの現在activeな問題一覧
+ * との突合）と同じ考え方をreviewGroupsへ適用する。1件でもquestionIdが見つからなければ
+ * （存在しない/非active/fieldId不一致のいずれか）review全体を開始しない
+ * （部分実行を防ぐ、Phase3D-4B設計監査の結論どおり）。
+ *
+ * @param {Array<{fieldId:string, questionIds:string[]}>} reviewGroups
+ * @param {(fieldId:string) => Promise<Array<{questionId:string}>>} getActiveQuestionsForField
+ * @returns {Promise<{ok:boolean, errorMessage?:string}>}
+ */
+export async function validateReviewGroups(reviewGroups, getActiveQuestionsForField) {
+  const groups = Array.isArray(reviewGroups) ? reviewGroups : [];
+
+  for (const group of groups) {
+    let activeQuestions;
+    try {
+      activeQuestions = await getActiveQuestionsForField(group.fieldId);
+    } catch (error) {
+      console.error("復習フェーズの問題データ取得に失敗:", group.fieldId, error);
+      return { ok: false, errorMessage: "復習問題のデータに不整合があります。先生に確認してください。" };
+    }
+
+    const activeIds = new Set((activeQuestions || []).map((q) => q.questionId));
+    const missingIds = (group.questionIds || []).filter((id) => !activeIds.has(id));
+
+    if (missingIds.length > 0) {
+      console.error(
+        "復習フェーズでquestionIdが見つかりません（存在しない/非active/fieldId不一致のいずれか）:",
+        { fieldId: group.fieldId, missingIds }
+      );
+      return { ok: false, errorMessage: "復習問題のデータに不整合があります。先生に確認してください。" };
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
+ * 復習フェーズ全体の完了集計を返し、runnerStateを非実行中へ戻す。
+ * 通常group分の集計ロジックはfinishRun()と重複させず、computeReviewCompletionSummary()
+ * （test-set-review-model.js）へ委譲する。finishRun()自体は変更しない
+ * （誤答0のTestSetでは今までどおりfinishRun()が使われる、Phase3D-4B-2設計方針どおり）。
+ *
+ * @returns {{label:string, totalQuestions:number, totalCorrect:number, totalIncorrect:number,
+ *   review: {totalQuestions:number, totalCorrect:number, totalIncorrect:number, remainingWrong:number}|null}}
+ */
+export function finishReviewRun() {
+  const summary = computeReviewCompletionSummary(runnerState.results, runnerState.reviewResults, runnerState.testSetLabel);
+  runnerState = createRunnerState();
+  return summary;
 }
