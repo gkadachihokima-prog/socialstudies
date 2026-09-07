@@ -239,12 +239,15 @@ function validateSaveAttemptProgressPayload_(payload) {
     throw new Error("sourceTypeが不正です: " + sourceType);
   }
 
-  // 既存handleStartAttemptと完全に同じルール: testset以外はtestSetId指定禁止。
-  if (sourceType === "testset" && !testSetId) {
-    throw new Error("sourceType=testsetの場合、testSetIdは必須です。");
+  // 既存handleStartAttemptと完全に同じルール: testset/testset_review以外はtestSetId指定禁止。
+  // Phase3D-4A前提: testset_review（学校別TestSetの全group完了後に行う、fieldId単位の
+  // 誤答復習Attempt。domain-model-v1.md 3.11.3節）もtestSetId必須の対象に含める
+  // （testset_reviewもtestset同様、必ず元TestSetのtestSetIdを持つため）。
+  if ((sourceType === "testset" || sourceType === "testset_review") && !testSetId) {
+    throw new Error("sourceType=testset/testset_reviewの場合、testSetIdは必須です。");
   }
-  if (sourceType !== "testset" && testSetId) {
-    throw new Error("sourceType=testset以外ではtestSetIdを指定できません。");
+  if (sourceType !== "testset" && sourceType !== "testset_review" && testSetId) {
+    throw new Error("sourceType=testset/testset_review以外ではtestSetIdを指定できません。");
   }
 
   if (ATTEMPT_PROGRESS_STATUS_VALUES_.indexOf(status) === -1) {

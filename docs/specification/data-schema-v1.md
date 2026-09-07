@@ -155,8 +155,8 @@ data/
 | `questionSetId` | 問題セットID | 同上 |
 | `questionSetVersion` | 問題セットバージョン | 同上 |
 | `fieldId` | 科目キー | 同上 |
-| `sourceType` | Attemptの起点（`normal`/`weak_review`/`dormant_review`/`testset`） | 3.11.1節（Phase5-0で追加確定） |
-| `testSetId` | TestSet起点のみ値あり、それ以外は空 | 同上 |
+| `sourceType` | Attemptの起点（`normal`/`weak_review`/`dormant_review`/`testset`/`testset_review`） | 3.11.1節（Phase5-0で追加確定）・3.11.3節（`testset_review`、Phase3D-4A前提で追加） |
+| `testSetId` | `testset`/`testset_review`起点のみ値あり、それ以外は空 | 同上 |
 | `startedAt` | 開始日時（ISO 8601） | 3.11節 |
 | `completedAt` | 完了日時（ISO 8601、未完了は空） | 同上 |
 | `completed` | 完了フラグ（true/false） | 同上 |
@@ -198,8 +198,8 @@ data/
 | `studentId` | 生徒ID（`attempts.studentId`と一致必須） | 同上 |
 | `fieldId` | 科目キー | 同上 |
 | `unit` | 単元（任意。`weak_review`/`dormant_review`等では空欄許容） | 同上 |
-| `sourceType` | `normal`/`testset`/`weak_review`/`dormant_review`のいずれか | 同上 |
-| `testSetId` | `sourceType="testset"`のときのみ必須、それ以外は空 | 同上 |
+| `sourceType` | `normal`/`testset`/`weak_review`/`dormant_review`/`testset_review`のいずれか（`testset_review`はPhase3D-4A前提で追加） | 同上 |
+| `testSetId` | `sourceType="testset"`または`sourceType="testset_review"`のときのみ必須、それ以外は空 | 同上 |
 | `questionIds` | 開始時点の出題順snapshot（JSON配列文字列、順序保持） | 同上 |
 | `currentQuestionIndex` | 次に表示すべき問題のindex（0-based、整数） | 同上 |
 | `wrongQuestionIds` | retry対象の順序付き配列（JSON配列文字列、空配列可） | 同上 |

@@ -3,6 +3,7 @@
 - 作成日: 2026-09-01（火）
 - 位置づけ: Attempt/AnswerRecord専用GAS（学習記録GAS、`docs/specification/gas-api-contract-v1.md` 5章）へ追加する、進行中学習状態（`attempt_progress`）保存基盤の正本コピー。本ファイル自体はこのリポジトリの実行環境からは一切参照されない（ビルド・アプリ本体のどこからもimportされない）。あくまで、別プロジェクトの学習記録Apps Scriptへ手動で反映するためのソースを、このリポジトリで版管理しておくための保管場所（`docs/operations/learning-summary/`と同じ位置づけ）。
 - **本番反映状況（2026-09-01（火）時点）: 反映済み・本番実API試験完了。** 詳細は6.1節参照。
+- **Phase3D-4A前提での更新（ローカル実装・未反映）**: `SOURCE_TYPE_VALUES`（0節参照）へ`testset_review`を追加し、`AttemptProgress.gs`の`validateSaveAttemptProgressPayload_`のtestSetId必須/禁止ルールを`testset`/`testset_review`両対応へ拡張した。0節の「4値」という記載は本番導入前の時点の記録であり、Phase3D-4A本番反映後は5値（`normal`/`weak_review`/`dormant_review`/`testset`/`testset_review`）となる。詳細は`docs/operations/learning-record-gas/TestSetReviewSourceType.gs`参照。
 
 ---
 

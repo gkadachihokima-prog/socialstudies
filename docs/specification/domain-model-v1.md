@@ -208,10 +208,29 @@ erDiagram
 
 | 属性 | 内容 |
 |---|---|
-| `sourceType` | Attemptの起点を表す。候補: `normal`（通常学習）／`weak_review`（苦手復習）／`dormant_review`（久しぶり復習）／`testset`（TestSet実行）。省略可能（未設定のAttemptは起点不明として扱う） |
-| `testSetId` | `sourceType="testset"`のときのみ値を持つ。それ以外は`null` |
+| `sourceType` | Attemptの起点を表す。候補: `normal`（通常学習）／`weak_review`（苦手復習）／`dormant_review`（久しぶり復習）／`testset`（TestSet実行）／`testset_review`（Phase3D-4A前提で追加、3.11.3節参照）。省略可能（未設定のAttemptは起点不明として扱う） |
+| `testSetId` | `sourceType="testset"`または`sourceType="testset_review"`のときのみ値を持つ。それ以外は`null` |
 
 `schoolId`/`gradeId`/`academicYearId`はAttemptへ重複保存しない。TestSet起点のAttemptについては、`testSetId`からTestSet専用GAS（9章）を逆引きすれば取得できるため、将来TestSet別・学校別分析が必要になった時点で参照する。Phase5-0時点では設計確定のみであり、既存のAttempt生成箇所（`app.js`の`startAttemptForQuiz`呼び出し、`startTestSetGroupQuiz`等）への配線はまだ行っていない（`docs/architecture/ls-total-test-system-design-v1.md` Phase5 Task内訳のPhase5-6で実施予定）。
+
+#### 3.11.3 `testset_review`（Phase3D-4A前提で追加、GAS基盤のみ確定・Web実装は未着手）
+
+Phase3D-4（学校別TestSet、全group通常問題完了後の誤答自動復習）の設計監査で、TestSetは複数`fieldId`を横断できる（9.8節）ため、全groupの誤答を1つのAttemptへ集約することは既存のQuestionSet単一`fieldId`制約と衝突すると判明した。したがって、誤答復習は**`fieldId`単位（＝groupと同じ単位）で複数のAttemptに分けて実行する**方式を正式仕様とする。
+
+`sourceType="testset"`をそのまま復習Attemptへ流用すると、`app.js`の`resumeQuiz()`/`showResumeCandidate()`が`sourceType==="testset"`を「通常TestSet group」として`restoreRunnerState()`へ誤って合流させてしまう危険があるため、専用の`sourceType="testset_review"`を新設する。
+
+| 属性 | 内容 |
+|---|---|
+| 意味 | あるTestSet実行（run）について、全group（通常ラウンド）完了後に行う、誤答問題のみを対象とした復習Attempt。**TestSet全体を表すsourceTypeではなく、1 fieldId分の復習Attemptを表す**（1回のTestSet runで誤答のあったfieldIdの数だけ、`testset_review`のAttemptが複数生成され得る）。 |
+| `testSetId` | 必須。復習対象の元TestSetのID（`sourceType="testset"`と同じルール）。 |
+| `fieldId`（questionSetId経由） | 単一`fieldId`必須（既存のQuestionSet単一fieldId制約を維持。TestSet全体ではなく、その回の復習対象1科目分）。 |
+| `questionIds` | その`fieldId`のgroup Attemptが持つ`initialWrongQuestionIds`のみ（TestSet全体の誤答配列を1 Attemptへまとめない）。 |
+| `retryWrongEnabled` | `false`固定（誤答復習は1巡のみ、Phase3D-4設計監査で確定）。 |
+| `initialWrongQuestionIds` | 通常のAttemptと同じ仕組みでこのAttempt自身にも保存される。復習中に再度誤答した問題の集合＝「復習後も間違えた問題」の正本となる。 |
+| Phase3D-1/3D-2対象 | **対象外**（`features/history/history-renderer.js`の`RETRY_ELIGIBLE_SOURCE_TYPES`へ追加しない。`testset`と同じ扱い）。 |
+| Phase3D-3対象 | 詳細閲覧は対象（sourceTypeを問わない既存仕様のまま）。表示上の特別な注記（「学校のテスト対策・間違い直し」等）はPhase3D-4Bで追加検討する。 |
+| run識別 | 専用のrun ID等は追加しない。既存`restoreRunnerState()`が採用している「resume対象より前のgroupについて、同一testSetId・同一fieldId・completed=trueのAttemptのうち最新completedAtの1件を採用する」というヒューリスティックを、復習フェーズの再構築へも同じ精度で拡張する（Phase3D-4Bで実装）。 |
+| Web実装状況 | **Phase3D-4A時点ではこのsourceTypeを実際に送信するWeb側の経路は存在しない**（GAS/契約/docs側の受け入れ基盤のみ）。復習フロー本体（runner拡張・UI・resume・summary）はPhase3D-4Bで実装する。 |
 
 #### 3.11.2 `initialWrongQuestionIds`（オプション属性、Phase3D-2前提で確定）
 
