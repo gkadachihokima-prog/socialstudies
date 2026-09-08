@@ -1,0 +1,4 @@
+# Phase4A: 問題CSV安全更新ワークフロー（scripts/update-question-csv.mjs）が
+# 一時的に扱う投入・処理済みCSV。正本はdata/*.csvのみで、ここには置かない。
+import/questions/*.csv
+import/questions/processed/*.csv
