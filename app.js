@@ -136,6 +136,7 @@ const homeError = document.getElementById("home-error");
 const homeTotalStudyDays = document.getElementById("home-total-study-days");
 const homeCurrentStreak = document.getElementById("home-current-streak");
 const homeLatestStudy = document.getElementById("home-latest-study");
+const homeLatestStudyCard = document.getElementById("home-latest-study-card");
 const homeWeakCount = document.getElementById("home-weak-count");
 const homeDetailToggleWrap = document.getElementById("home-detail-toggle-wrap");
 const homeDetailToggle = document.getElementById("home-detail-toggle");
@@ -152,6 +153,7 @@ const homeElements = {
   totalStudyDays: homeTotalStudyDays,
   currentStreak: homeCurrentStreak,
   latestStudy: homeLatestStudy,
+  latestStudyCard: homeLatestStudyCard,
   weakCount: homeWeakCount,
   detailToggleWrap: homeDetailToggleWrap,
   detail: homeDetail,
@@ -292,9 +294,12 @@ const reviewStartBannerCloseButton = document.getElementById("review-start-banne
 
 // Phase2 Task21-3: 「苦手を復習」「復習する」ボタン押下時に呼ばれるコールバック。
 // home-renderer.js はこれらの中身（Bridge呼び出し・クイズ開始）を一切知らない。
+// Phase4C-1: onLatestStudyClickは「前回学習」カード押下時。home-renderer.jsは
+// 既存学習履歴詳細（history-detail-screen）の描画ロジックを一切知らない。
 const homePracticeCallbacks = {
   onPracticeWeakField: startWeaknessReview,
-  onPracticeDormantField: startDormantReview
+  onPracticeDormantField: startDormantReview,
+  onLatestStudyClick: handleHomeLatestStudyClick
 };
 
 const studentNameInput = document.getElementById("student-name-input");
@@ -391,7 +396,7 @@ homeStartButton.addEventListener("click", goToStartScreenFromHome);
 homeDetailToggle.addEventListener("click", () => toggleHomeDetail(homeElements));
 homeHistoryButton.addEventListener("click", goToHistoryScreen);
 historyBackButton.addEventListener("click", returnToHome);
-historyDetailBackButton.addEventListener("click", returnToHistoryFromDetail);
+historyDetailBackButton.addEventListener("click", returnFromHistoryDetail);
 
 homeTeacherModeButton.addEventListener("click", goToTeacherScreen);
 teacherBackButton.addEventListener("click", returnToHome);
@@ -1695,19 +1700,29 @@ function goToHistoryScreen() {
   showHistoryScreen(historyScreen, allScreens);
 }
 
-// Phase3D-3: 学習履歴「詳細」画面へ戻る。history-screenは非表示中もDOM上に残ったまま
+// Phase3D-3: 学習履歴「詳細」画面から戻る。history-screenは非表示中もDOM上に残ったまま
 // （core/screen-controller.jsのdisplay:none/block切り替えのみ、要素は破棄されない）ため、
 // 履歴一覧を再取得・再描画しない（追加監査D/E：スクロール位置・DOMともに自然に保持される）。
-function returnToHistoryFromDetail() {
+// Phase4C-1: 戻り先はhistoryDetailReturnTargetで分岐する（Home起点なら「ホームへ戻る」、
+// 履歴一覧起点なら従来どおり「学習履歴へ戻る」）。大規模なnavigation historyは持たず、
+// 直近の遷移元1件のみを覚える最小限の状態にとどめる。
+let historyDetailReturnTarget = "history";
+
+function returnFromHistoryDetail() {
+  if (historyDetailReturnTarget === "home") {
+    returnToHome();
+    return;
+  }
   showHistoryScreen(historyScreen, allScreens);
 }
 
 // Phase3D-3: 学習履歴「詳細」。二重押し防止のための簡易な再入防止フラグ
 // （3D-1/3D-2のhistoryRetryInProgressとは別。詳細表示は新Attemptを作らない読み取り専用の
-// ため、共有ガードを再利用する必要はない）。
+// ため、共有ガードを再利用する必要はない）。Phase4C-1でHome起点の入口が増えても、
+// この1つのフラグをそのまま共有する（読み取り専用処理という性質は入口が増えても変わらない）。
 let historyDetailLoadInProgress = false;
 
-async function handleHistoryDetailClick(entry) {
+async function showHistoryDetailForEntry(entry) {
   if (historyDetailLoadInProgress) return;
   historyDetailLoadInProgress = true;
 
@@ -1722,6 +1737,21 @@ async function handleHistoryDetailClick(entry) {
   } finally {
     historyDetailLoadInProgress = false;
   }
+}
+
+// Phase3D-3: 学習履歴一覧（history-screen）から「詳細」を押した場合の入口。
+function handleHistoryDetailClick(entry) {
+  historyDetailReturnTarget = "history";
+  return showHistoryDetailForEntry(entry);
+}
+
+// Phase4C-1: ホーム「前回学習」カードを押した場合の入口。history-detail-model/service/
+// rendererはPhase3D-3のものをそのまま再利用し、home専用のdetail資産は一切作らない。
+// entryはhome-renderer.js側でHome描画時に既に解決済み（getLatestCompletedAttempt由来）の
+// ものをそのまま受け取るだけで、ここで再取得・再判定はしない。
+function handleHomeLatestStudyClick(entry) {
+  historyDetailReturnTarget = "home";
+  return showHistoryDetailForEntry(entry);
 }
 
 // Phase3D-1: 学習履歴「もう一度やる」。二重押し防止のための簡易な再入防止フラグ

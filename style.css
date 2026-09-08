@@ -735,6 +735,26 @@ select {
   grid-column: 1 / -1;
 }
 
+/* Phase4C-1: 「前回学習」カードをbutton化（タップで既存学習履歴詳細へ）。
+   .home-stat-cardの見た目（背景・枠線・padding）はそのまま、button要素のデフォルト
+   スタイルのみリセットする。押せる学習記録が無い場合はdisabledのまま見た目・挙動を変えない。 */
+.home-latest-study-card {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.home-latest-study-card:not(:disabled) {
+  cursor: pointer;
+}
+
+.home-latest-study-card:not(:disabled):focus-visible {
+  outline: 2px solid #2f4d8f;
+  outline-offset: 2px;
+}
+
 .home-stat-label {
   margin: 0 0 6px;
   font-size: 0.85rem;

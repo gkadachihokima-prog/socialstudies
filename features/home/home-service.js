@@ -17,6 +17,7 @@ import {
   getHistoryDashboard,
   getHistoryOverview,
   getLatestAttempt,
+  getLatestCompletedAttempt,
   getStudyPeriod,
   getCurrentStudyStreak,
   getStudiedFields,
@@ -41,21 +42,27 @@ export function getHomeData(studentId) {
  * 【取得】ホーム画面上部の概要表示（学習履歴概要・最後の学習）だけをまとめて取得する。
  * ホーム画面は、上部の概要表示にはこのAPIだけを取得すれば済むようにする想定。
  *
- * getHistoryOverview()・getLatestAttempt()（いずれもfeatures/history/history-service.js）
- * のみを利用する。getHistoryDashboard()・getHomeData()は経由せず、新しい探索処理も書かない。
+ * getHistoryOverview()・getLatestAttempt()・getLatestCompletedAttempt()
+ * （いずれもfeatures/history/history-service.js）のみを利用する。getHistoryDashboard()・
+ * getHomeData()は経由せず、新しい探索処理も書かない。
  * Repository・Storage・AttemptService・AnswerRecordService・QuestionSetServiceへは
  * 一切直接アクセスしない。
+ *
+ * Phase4C-1: latestCompletedAttemptは「前回学習」カードのタップ先解決専用
+ * （既存latestAttemptの表示テキストは変更しない、completed問わず従来どおり）。
  *
  * @param {string} studentId
  * @returns {{
  *   historyOverview: ReturnType<typeof getHistoryOverview>,
- *   latestAttempt: ReturnType<typeof getLatestAttempt>
+ *   latestAttempt: ReturnType<typeof getLatestAttempt>,
+ *   latestCompletedAttempt: ReturnType<typeof getLatestCompletedAttempt>
  * }}
  */
 export function getHomeOverview(studentId) {
   return {
     historyOverview: getHistoryOverview(studentId),
-    latestAttempt: getLatestAttempt(studentId)
+    latestAttempt: getLatestAttempt(studentId),
+    latestCompletedAttempt: getLatestCompletedAttempt(studentId)
   };
 }
 

@@ -33,6 +33,8 @@ const DORMANT_DISPLAY_LIMIT = 5;
  * @property {HTMLElement} totalStudyDays - 累計学習日数の表示先
  * @property {HTMLElement} currentStreak - 連続学習日数の表示先
  * @property {HTMLElement} latestStudy - 前回学習の表示先
+ * @property {HTMLButtonElement} latestStudyCard - 前回学習カード全体（Phase4C-1: 既存学習履歴
+ *   詳細へのタップ先。完了済みAttemptが無い場合はdisabledのまま）
  * @property {HTMLElement} weakCount - 苦手問題数の表示先
  * @property {HTMLElement} detailToggleWrap - 詳細表示トグルボタンのラッパー
  * @property {HTMLElement} detail - 詳細表示コンテナ（折りたたみ対象）
@@ -72,6 +74,8 @@ function showHomeEmptyState(elements) {
   elements.emptyMessage.classList.remove("hidden");
   elements.errorMessage.textContent = "";
   elements.startButton.disabled = true;
+  elements.latestStudyCard.disabled = true;
+  elements.latestStudyCard.onclick = null;
 }
 
 /**
@@ -85,6 +89,8 @@ function showHomeErrorState(elements) {
   elements.emptyMessage.classList.add("hidden");
   elements.errorMessage.textContent = "学習状況の取得に失敗しました。時間をおいて再度お試しください。";
   elements.startButton.disabled = false;
+  elements.latestStudyCard.disabled = true;
+  elements.latestStudyCard.onclick = null;
 }
 
 /**
@@ -242,6 +248,8 @@ function renderDormantList(dormantQuestions, dormantCountByField, listElement, o
  * @typedef {Object} HomePracticeCallbacks
  * @property {(fieldId: string) => void} [onPracticeWeakField] - 「苦手を復習」ボタン押下時
  * @property {(fieldId: string) => void} [onPracticeDormantField] - 「復習する」ボタン押下時
+ * @property {(entry: Object) => void} [onLatestStudyClick] - 「前回学習」カード押下時
+ *   （Phase4C-1。completed済みAttemptが無い場合はカードがdisabledのため呼ばれない）
  */
 
 /**
@@ -259,6 +267,17 @@ function renderHomeDashboard(homeInitialData, elements, callbacks) {
   elements.currentStreak.textContent = `${historyOverview.currentStudyStreak}日`;
   elements.latestStudy.textContent = formatLatestStudyText(dashboard.overview.latestAttempt);
   elements.weakCount.textContent = `${weakDashboard.summary.weakQuestionCount}問`;
+
+  // Phase4C-1: 「前回学習」カードのタップ先はcompleted済みAttemptに限定する
+  // （in_progressのみの場合はresumeに任せ、detailへは導線を出さない）。
+  // .onclick=での代入は、Homeが同じ要素を何度も再描画する（生徒切替・ホームへ戻る等）ため、
+  // addEventListenerの多重登録を避けるための既定パターン（前回分のハンドラを自動的に置き換える）。
+  const latestCompletedEntry = dashboard.overview.latestCompletedAttempt;
+  elements.latestStudyCard.disabled = !latestCompletedEntry;
+  elements.latestStudyCard.onclick =
+    latestCompletedEntry && typeof callbacks?.onLatestStudyClick === "function"
+      ? () => callbacks.onLatestStudyClick(latestCompletedEntry)
+      : null;
 
   const weakCountByField = buildWeakCountByField(weakDashboard.weakFields);
   const dormantCountByField = buildDormantCountByField(weakDashboard.dormantQuestions);

@@ -356,6 +356,28 @@ export function getLatestAttempt(studentId) {
 }
 
 /**
+ * 【取得】studentIdに紐づく学習履歴のうち、completed===trueのAttemptに限定した
+ * 最新のエントリを取得する（Phase4C-1: ホーム「前回学習」カードのタップ先解決専用）。
+ *
+ * Repository・Storage・AttemptService・QuestionSetService・AnswerRecordServiceへは
+ * 一切直接アクセスせず、既存公開API（getStudentHistory）のみを使う。
+ * 最新Attemptの探索はgetLatestAttempt()と同じfindLatestHistoryEntry()に委譲する
+ * （探索・比較ロジックの重複実装はしない）。sourceTypeによる絞り込みは行わない
+ * （normal/weak_review/dormant_review/testset/testset_reviewいずれもcompletedなら対象）。
+ *
+ * @param {string} studentId
+ * @returns {{
+ *   attempt: import("./attempt-model.js").Attempt,
+ *   questionSet: import("../question-set/question-set-model.js").QuestionSet|null,
+ *   answerRecords: Array<import("./answer-record-model.js").AnswerRecord>
+ * } | null}
+ */
+export function getLatestCompletedAttempt(studentId) {
+  const history = getStudentHistory(studentId).filter((entry) => entry.attempt?.completed === true);
+  return findLatestHistoryEntry(history) ?? null;
+}
+
+/**
  * 【一覧取得】studentIdに紐づく学習履歴（getStudentHistory）を、新しい順・古い順で
  * 並び替えた一覧として取得する。学習履歴画面・ランキング・生徒詳細画面等から利用する想定。
  *
