@@ -528,7 +528,7 @@ async function executeStartQuiz() {
   const unitFilter = String(unitFilterSelect.value || "all").trim();
   const modeFilter = String(modeFilterSelect.value || "all").trim();
   const subunitFilter = String(subunitFilterSelect.value || "all").trim();
-  const requestedQuestionCount = Number(questionCountSelect.value || 10);
+  const requestedQuestionCount = Number(questionCountSelect.value || 20);
 
   startError.textContent = "";
 
@@ -1320,6 +1320,11 @@ function syncStartScreenStudentDisplay() {
 
 function goToStartScreenFromHome() {
   if (!state.session.studentId) return;
+
+  // Phase4B-1: 共用タブレット運用のため、生徒切替のたびに問題数選択を既定値（20問）へ
+  // 戻す（前の生徒が選んだ100問等を、そのまま次の生徒が引き継がないようにするため）。
+  // 同じ生徒がquiz画面から「開始画面へ戻る」場合（backToStart()）はリセットしない。
+  questionCountSelect.value = "20";
 
   syncStartScreenStudentDisplay();
   showStartScreen(startScreen, allScreens);

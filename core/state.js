@@ -6,7 +6,7 @@ function createSessionState() {
     unitFilter: "all",
     modeFilter: "all",
     subunitFilter: "all",
-    requestedQuestionCount: 10,
+    requestedQuestionCount: 20,
     retryWrongEnabled: true,
     activeStudents: [],
     questionCacheBySubject: {}
