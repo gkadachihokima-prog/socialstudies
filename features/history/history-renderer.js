@@ -22,7 +22,7 @@ import {
   getStudentHistoryList
 } from "./history-service.js";
 import { SUBJECT_CONFIG } from "../../config/subjects.js";
-import { isWrongRetryEligibleAttempt } from "../../core/quiz-controller.js";
+import { isWrongRetryEligibleAttempt, isRetryEligibleAttempt } from "../../core/quiz-controller.js";
 
 const RECENT_HISTORY_LIMIT = 5;
 
@@ -263,9 +263,7 @@ function renderRecentList(items, listElement, onRetryAttempt, onRetryWrongAttemp
     item.appendChild(count);
 
     const isRetryEligible =
-      entry.attempt?.completed === true &&
-      answeredCount > 0 &&
-      RETRY_ELIGIBLE_SOURCE_TYPES.has(entry.attempt?.sourceType) &&
+      isRetryEligibleAttempt(entry.attempt, answeredCount, RETRY_ELIGIBLE_SOURCE_TYPES) &&
       typeof onRetryAttempt === "function";
 
     const isWrongRetryEligible =

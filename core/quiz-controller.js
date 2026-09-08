@@ -417,3 +417,26 @@ export function isWrongRetryEligibleAttempt(attempt, retryEligibleSourceTypes) {
       attempt.initialWrongQuestionIds.length > 0
   );
 }
+
+/**
+ * Phase4C-2: history-renderer.js（履歴一覧）に元々インラインで実装されていた
+ * 「もう一度やる」表示条件を、isWrongRetryEligibleAttempt()と同じ場所へ抽出した純粋関数。
+ * history-renderer.js（一覧）・history-detail-renderer.js（詳細）の両方から参照し、
+ * 判定基準を1箇所に保つ（Phase4C-2でdetail画面へ再挑戦導線を追加するにあたり、
+ * 表示条件を2箇所に複製しないための抽出。判定内容自体は変更しない）。
+ *
+ * 対象: completed===true かつ answeredCount（呼び出し元のanswerRecords.length）が
+ * 1件以上 かつ sourceTypeがretryEligibleSourceTypesに含まれる（TestSet・未知sourceTypeは対象外）。
+ *
+ * @param {import("../features/history/attempt-model.js").Attempt} attempt
+ * @param {number} answeredCount - 呼び出し元が持つAnswerRecord件数（entry.answerRecords.length）
+ * @param {Set<string>} retryEligibleSourceTypes - 呼び出し元が持つホワイトリスト
+ *   （history-renderer.jsのRETRY_ELIGIBLE_SOURCE_TYPESをそのまま渡す想定、
+ *   本ファイル側で別のリストを新設しない）
+ * @returns {boolean}
+ */
+export function isRetryEligibleAttempt(attempt, answeredCount, retryEligibleSourceTypes) {
+  return Boolean(
+    attempt?.completed === true && answeredCount > 0 && retryEligibleSourceTypes?.has(attempt?.sourceType)
+  );
+}

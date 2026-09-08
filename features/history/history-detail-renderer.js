@@ -12,8 +12,9 @@
 // 日付・科目名の表示基準はhistory-renderer.jsのformatDateLabel()/getSubjectLabel()を
 // そのまま再利用する（表示ロジックを2箇所に分岐させない）。
 
-import { getSubjectLabel, formatDateLabel } from "./history-renderer.js";
+import { getSubjectLabel, formatDateLabel, RETRY_ELIGIBLE_SOURCE_TYPES } from "./history-renderer.js";
 import { applyFuriganaText } from "../furigana/furigana-apply.js";
+import { isWrongRetryEligibleAttempt, isRetryEligibleAttempt } from "../../core/quiz-controller.js";
 
 function renderQuestionItem(item) {
   const card = document.createElement("div");
@@ -118,4 +119,59 @@ export function renderHistoryDetailScreen(viewModel, elements) {
  */
 export function showHistoryDetailError(elements, message) {
   elements.error.textContent = message || "";
+}
+
+/**
+ * @typedef {Object} HistoryDetailRetryCallbacks
+ * @property {(entry: Object) => void} [onRetryAttempt] - 「もう一度やる」押下時
+ * @property {(entry: Object) => void} [onRetryWrongAttempt] - 「間違えたN問をやり直す」押下時
+ */
+
+/**
+ * Phase4C-2: detail画面内の「間違えたN問をやり直す」「もう一度やる」ボタンを描画する。
+ *
+ * eligibility判定はhistory-renderer.js（履歴一覧）と同じ isRetryEligibleAttempt()・
+ * isWrongRetryEligibleAttempt()（core/quiz-controller.js）に一本化する（判定条件を
+ * 2箇所に複製しない）。表示テキスト・並び順（誤答復習を先に配置）もhistory-renderer.jsの
+ * renderRecentList()と揃える。
+ *
+ * 押下時の実処理（questionIds復元・resume競合確認・Attempt生成等）は一切ここで行わず、
+ * コールバックへ丸ごと委譲する（本ファイルはrenderer、Attempt開始処理はapp.js側の責務、
+ * history-renderer.js側の既存構造と同じ）。
+ *
+ * @param {{attempt:Object, questionSet:Object|null, answerRecords:Array<Object>}|null} entry
+ *   - detail表示中のentry。表示できるentryが無い場合（読込失敗時等）はnullを渡すと
+ *     両ボタンとも非表示になる。
+ * @param {{retryWrongButton:HTMLButtonElement, retryButton:HTMLButtonElement}} elements
+ * @param {HistoryDetailRetryCallbacks} [callbacks]
+ */
+export function renderHistoryDetailRetryActions(entry, elements, callbacks = {}) {
+  const attempt = entry?.attempt;
+  const answeredCount = Array.isArray(entry?.answerRecords) ? entry.answerRecords.length : 0;
+
+  const isWrongRetryEligible =
+    Boolean(entry) && isWrongRetryEligibleAttempt(attempt, RETRY_ELIGIBLE_SOURCE_TYPES);
+  const isRetryEligible =
+    Boolean(entry) && isRetryEligibleAttempt(attempt, answeredCount, RETRY_ELIGIBLE_SOURCE_TYPES);
+
+  // Phase3D-2のhistory-renderer.jsと同じ理由（誤答復習の方をやや優先）で、
+  // wrongボタンを先に配置する（DOM順自体はindex.html側で固定済み、ここではhidden切替のみ）。
+  if (isWrongRetryEligible) {
+    elements.retryWrongButton.textContent = `間違えた${attempt.initialWrongQuestionIds.length}問をやり直す`;
+    elements.retryWrongButton.classList.remove("hidden");
+    elements.retryWrongButton.onclick =
+      typeof callbacks.onRetryWrongAttempt === "function" ? () => callbacks.onRetryWrongAttempt(entry) : null;
+  } else {
+    elements.retryWrongButton.classList.add("hidden");
+    elements.retryWrongButton.onclick = null;
+  }
+
+  if (isRetryEligible) {
+    elements.retryButton.classList.remove("hidden");
+    elements.retryButton.onclick =
+      typeof callbacks.onRetryAttempt === "function" ? () => callbacks.onRetryAttempt(entry) : null;
+  } else {
+    elements.retryButton.classList.add("hidden");
+    elements.retryButton.onclick = null;
+  }
 }

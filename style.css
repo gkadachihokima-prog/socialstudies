@@ -1023,6 +1023,23 @@ select {
   font-size: 0.82rem;
 }
 
+/* Phase4C-2: detail画面内の再挑戦操作。100件detailでも一覧をスクロールせず
+   操作できるよう、summaryの直下（問題リストより前）に配置する。幅を問わず
+   常に縦積みにする（history-recent-item-actionsのような横並びコンパクト表示ではなく、
+   detail画面では学習開始操作を主役として大きく見せる）。 */
+.history-detail-retry-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.history-detail-retry-actions .primary-button,
+.history-detail-retry-actions .secondary-button {
+  width: 100%;
+  min-height: 44px;
+}
+
 .history-detail-list {
   display: flex;
   flex-direction: column;

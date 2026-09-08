@@ -74,7 +74,11 @@ import { renderHomeForStudent, toggleHomeDetail } from "./features/home/home-ren
 import { buildHomePracticeQuiz } from "./features/home/home-practice-controller.js";
 import { renderHistoryForStudent, RETRY_ELIGIBLE_SOURCE_TYPES } from "./features/history/history-renderer.js";
 import { getHistoryDetailViewModel } from "./features/history/history-detail-service.js";
-import { renderHistoryDetailScreen, showHistoryDetailError } from "./features/history/history-detail-renderer.js";
+import {
+  renderHistoryDetailScreen,
+  showHistoryDetailError,
+  renderHistoryDetailRetryActions
+} from "./features/history/history-detail-renderer.js";
 import { initTeacherScreen } from "./features/teacher/teacher-controller.js";
 import { initTeacherHistorySection } from "./features/teacher/teacher-history-controller.js";
 import { initTestSetStudentScreen, showTestSetCompletion } from "./features/test-set-student/test-set-student-controller.js";
@@ -198,6 +202,9 @@ const historyDetailSourceNote = document.getElementById("history-detail-source-n
 const historyDetailList = document.getElementById("history-detail-list");
 const historyDetailError = document.getElementById("history-detail-error");
 const historyDetailBackButton = document.getElementById("history-detail-back-button");
+// Phase4C-2: detail画面内の再挑戦ボタン。
+const historyDetailRetryWrongButton = document.getElementById("history-detail-retry-wrong-button");
+const historyDetailRetryButton = document.getElementById("history-detail-retry-button");
 
 const historyDetailElements = {
   dateLabel: historyDetailDate,
@@ -205,7 +212,9 @@ const historyDetailElements = {
   countLabel: historyDetailCount,
   sourceNote: historyDetailSourceNote,
   list: historyDetailList,
-  error: historyDetailError
+  error: historyDetailError,
+  retryWrongButton: historyDetailRetryWrongButton,
+  retryButton: historyDetailRetryButton
 };
 
 // Task53: 講師用問題選定画面（teacher-screen）のDOM要素。
@@ -1729,14 +1738,35 @@ async function showHistoryDetailForEntry(entry) {
   try {
     const viewModel = await getHistoryDetailViewModel(entry);
     renderHistoryDetailScreen(viewModel, historyDetailElements);
+    renderHistoryDetailRetryActions(entry, historyDetailElements, {
+      onRetryAttempt: handleHistoryDetailRetryAttempt,
+      onRetryWrongAttempt: handleHistoryDetailRetryWrongAttempt
+    });
     showHistoryDetailScreen(historyDetailScreen, allScreens);
   } catch (error) {
     console.error("学習履歴の詳細取得でエラーが発生しました（既存の履歴表示には影響しません）:", error);
     showHistoryDetailError(historyDetailElements, "この学習履歴の詳細を表示できませんでした。");
+    renderHistoryDetailRetryActions(null, historyDetailElements);
     showHistoryDetailScreen(historyDetailScreen, allScreens);
   } finally {
     historyDetailLoadInProgress = false;
   }
+}
+
+// Phase4C-2: detail画面内の再挑戦ボタン押下時の入口。entryはrenderHistoryDetailRetryActions()が
+// このdetail表示時点で解決済みのものをそのまま受け取るだけで、ここで再取得・再判定はしない
+// （home-renderer.jsの4C-1「前回学習」カードと同じ構造）。押下時点でstudentIdが表示時と
+// 一致しない場合（理論上は生徒切替がdetail画面を離れずには起こり得ないが、念のための防御）は
+// 何もしない。実処理は既存3D-1/3D-2ハンドラへ丸ごと委譲し、エラー表示先のみdetail画面側
+// （historyDetailError）に差し替える（history-screen側のhistoryErrorは非表示中で見えないため）。
+function handleHistoryDetailRetryAttempt(entry) {
+  if (!entry?.attempt || entry.attempt.studentId !== state.session.studentId) return;
+  return handleHistoryRetryClick(entry, { errorTarget: historyDetailError });
+}
+
+function handleHistoryDetailRetryWrongAttempt(entry) {
+  if (!entry?.attempt || entry.attempt.studentId !== state.session.studentId) return;
+  return handleHistoryRetryWrongClick(entry, { errorTarget: historyDetailError });
 }
 
 // Phase3D-3: 学習履歴一覧（history-screen）から「詳細」を押した場合の入口。
@@ -1761,10 +1791,15 @@ let historyRetryInProgress = false;
 // STEP38の処理順を守る: 履歴item検証(questionIds復元・fieldId/unit確認含む)→開始可能確定→
 // resume競合confirm→必要ならabandon→新Attempt開始。無効な履歴の再挑戦のために、
 // 有効なresume候補を先に破棄しないよう、検証は競合ガードより必ず前に行う。
-async function handleHistoryRetryClick(entry) {
+//
+// Phase4C-2: errorTargetはエラー文言の表示先（既定はhistoryError＝history-screen側）。
+// history-detail-screenから呼ばれる場合、history-screenは非表示中のためhistoryErrorへ
+// 書いても利用者に見えない。retryロジック自体は複製せず、表示先のみを呼び出し元から
+// 差し替え可能にする最小限の変更（呼び出し元＝app.js内、公開APIの形は変えない）。
+async function handleHistoryRetryClick(entry, { errorTarget = historyError } = {}) {
   if (historyRetryInProgress) return;
   historyRetryInProgress = true;
-  historyError.textContent = "";
+  errorTarget.textContent = "";
 
   try {
     const attempt = entry?.attempt;
@@ -1772,14 +1807,14 @@ async function handleHistoryRetryClick(entry) {
 
     const fieldResult = resolveFixedSessionFieldId(answerRecords);
     if (!fieldResult.ok) {
-      historyError.textContent = "この学習は現在やり直せません。";
+      errorTarget.textContent = "この学習は現在やり直せません。";
       return;
     }
 
     const questions = await filterManager.getNormalizedQuestionsForSubject(fieldResult.fieldId);
     const prepared = prepareFixedQuestionSession({ state, questions, answerRecords });
     if (!prepared.ok) {
-      historyError.textContent = prepared.errorMessage;
+      errorTarget.textContent = prepared.errorMessage;
       return;
     }
 
@@ -1791,7 +1826,7 @@ async function handleHistoryRetryClick(entry) {
     );
   } catch (error) {
     console.error("学習履歴の再挑戦準備でエラーが発生しました（既存の履歴表示には影響しません）:", error);
-    historyError.textContent = "この学習は現在やり直せません。";
+    errorTarget.textContent = "この学習は現在やり直せません。";
   } finally {
     historyRetryInProgress = false;
   }
@@ -1802,16 +1837,18 @@ async function handleHistoryRetryClick(entry) {
 // （履歴画面から一度に1つの新Attemptしか開始できないという既存前提と同じ）。
 // 表示条件（isWrongRetryEligibleAttempt）と同じ判定を、DOM操作等で直接呼ばれた場合に備えて
 // ここでも独立して再検証する（UI非表示だけに頼らない、STEP34/35/37の防御）。
-async function handleHistoryRetryWrongClick(entry) {
+//
+// Phase4C-2: errorTargetはhandleHistoryRetryClick()と同じ理由・同じ既定値。
+async function handleHistoryRetryWrongClick(entry, { errorTarget = historyError } = {}) {
   if (historyRetryInProgress) return;
   historyRetryInProgress = true;
-  historyError.textContent = "";
+  errorTarget.textContent = "";
 
   try {
     const attempt = entry?.attempt;
 
     if (!isWrongRetryEligibleAttempt(attempt, RETRY_ELIGIBLE_SOURCE_TYPES)) {
-      historyError.textContent = "この学習には、間違えた問題の記録がありません。";
+      errorTarget.textContent = "この学習には、間違えた問題の記録がありません。";
       return;
     }
 
@@ -1821,14 +1858,14 @@ async function handleHistoryRetryWrongClick(entry) {
 
     const fieldResult = resolveFixedSessionFieldId(wrongRecords);
     if (!fieldResult.ok) {
-      historyError.textContent = "この学習は現在やり直せません。";
+      errorTarget.textContent = "この学習は現在やり直せません。";
       return;
     }
 
     const questions = await filterManager.getNormalizedQuestionsForSubject(fieldResult.fieldId);
     const prepared = prepareFixedWrongQuestionSession({ state, questions, attempt, answerRecords });
     if (!prepared.ok) {
-      historyError.textContent = prepared.errorMessage;
+      errorTarget.textContent = prepared.errorMessage;
       return;
     }
 
@@ -1839,7 +1876,7 @@ async function handleHistoryRetryWrongClick(entry) {
     );
   } catch (error) {
     console.error("学習履歴の誤答再挑戦準備でエラーが発生しました（既存の履歴表示には影響しません）:", error);
-    historyError.textContent = "この学習は現在やり直せません。";
+    errorTarget.textContent = "この学習は現在やり直せません。";
   } finally {
     historyRetryInProgress = false;
   }
