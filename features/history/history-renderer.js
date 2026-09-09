@@ -58,7 +58,9 @@ export function formatDateLabel(isoTimestamp) {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-function formatPercent(rate) {
+// Phase4D-1+2: features/weakness/配下（苦手一覧・苦手詳細）からも同じ%表示整形を
+// 再利用するためexportする（重複formatterを作らない）。
+export function formatPercent(rate) {
   return `${Math.round((rate || 0) * 100)}%`;
 }
 

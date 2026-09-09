@@ -36,6 +36,8 @@ const DORMANT_DISPLAY_LIMIT = 5;
  * @property {HTMLButtonElement} latestStudyCard - 前回学習カード全体（Phase4C-1: 既存学習履歴
  *   詳細へのタップ先。完了済みAttemptが無い場合はdisabledのまま）
  * @property {HTMLElement} weakCount - 苦手問題数の表示先
+ * @property {HTMLButtonElement} weakCountCard - 苦手問題カード全体（Phase4D-1+2: 苦手一覧
+ *   画面へのタップ先。苦手問題が0件の場合はdisabledのまま）
  * @property {HTMLElement} detailToggleWrap - 詳細表示トグルボタンのラッパー
  * @property {HTMLElement} detail - 詳細表示コンテナ（折りたたみ対象）
  * @property {HTMLElement} fieldList - 科目別学習状況の表示先
@@ -76,6 +78,8 @@ function showHomeEmptyState(elements) {
   elements.startButton.disabled = true;
   elements.latestStudyCard.disabled = true;
   elements.latestStudyCard.onclick = null;
+  elements.weakCountCard.disabled = true;
+  elements.weakCountCard.onclick = null;
 }
 
 /**
@@ -91,6 +95,8 @@ function showHomeErrorState(elements) {
   elements.startButton.disabled = false;
   elements.latestStudyCard.disabled = true;
   elements.latestStudyCard.onclick = null;
+  elements.weakCountCard.disabled = true;
+  elements.weakCountCard.onclick = null;
 }
 
 /**
@@ -250,6 +256,8 @@ function renderDormantList(dormantQuestions, dormantCountByField, listElement, o
  * @property {(fieldId: string) => void} [onPracticeDormantField] - 「復習する」ボタン押下時
  * @property {(entry: Object) => void} [onLatestStudyClick] - 「前回学習」カード押下時
  *   （Phase4C-1。completed済みAttemptが無い場合はカードがdisabledのため呼ばれない）
+ * @property {() => void} [onWeakCountClick] - 「苦手問題」カード押下時
+ *   （Phase4D-1+2。苦手問題が0件の場合はカードがdisabledのため呼ばれない）
  */
 
 /**
@@ -278,6 +286,14 @@ function renderHomeDashboard(homeInitialData, elements, callbacks) {
     latestCompletedEntry && typeof callbacks?.onLatestStudyClick === "function"
       ? () => callbacks.onLatestStudyClick(latestCompletedEntry)
       : null;
+
+  // Phase4D-1+2: 「苦手問題」カードのタップ先は苦手一覧画面。4C-1「前回学習」カードと
+  // 同じ.onclick=代入パターン（Homeの再描画のたびにハンドラを置き換える）。
+  // 苦手0件ならdisabledのまま（一覧画面自体は空状態として作るが、タップ導線は出さない）。
+  const hasWeakQuestions = weakDashboard.summary.weakQuestionCount > 0;
+  elements.weakCountCard.disabled = !hasWeakQuestions;
+  elements.weakCountCard.onclick =
+    hasWeakQuestions && typeof callbacks?.onWeakCountClick === "function" ? () => callbacks.onWeakCountClick() : null;
 
   const weakCountByField = buildWeakCountByField(weakDashboard.weakFields);
   const dormantCountByField = buildDormantCountByField(weakDashboard.dormantQuestions);

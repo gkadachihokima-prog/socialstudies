@@ -755,6 +755,25 @@ select {
   outline-offset: 2px;
 }
 
+/* Phase4D-1+2: 「苦手問題」カードをbutton化（タップで苦手一覧画面へ）。
+   home-latest-study-cardと同じリセット方針、苦手問題が0件の場合はdisabledのまま。 */
+.home-weak-count-card {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.home-weak-count-card:not(:disabled) {
+  cursor: pointer;
+}
+
+.home-weak-count-card:not(:disabled):focus-visible {
+  outline: 2px solid #2f4d8f;
+  outline-offset: 2px;
+}
+
 .home-stat-label {
   margin: 0 0 6px;
   font-size: 0.85rem;
@@ -1113,6 +1132,130 @@ select {
 }
 
 .history-detail-item-explanation {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #e0e4ec;
+  font-size: 0.88rem;
+  color: #445;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+/* =========================
+   weakness-screen / weakness-detail-screen (Phase4D-1+2)
+========================= */
+
+.weakness-empty-message {
+  color: #667;
+  margin: 4px 0 16px;
+  line-height: 1.6;
+}
+
+.weakness-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+/* card全体をbutton化（history-detail-latest-study-card等と同じ方針）。
+   history-recent-itemの横並びコンパクト表示ではなく、1問1行の縦積みカードにする。 */
+.weakness-list-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 14px;
+  background: #f7f9fc;
+  border: 1px solid #e0e4ec;
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.weakness-list-item:focus-visible {
+  outline: 2px solid #2f4d8f;
+  outline-offset: 2px;
+}
+
+.weakness-list-item-unavailable {
+  cursor: default;
+  color: #667;
+}
+
+.weakness-list-item-subject {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: bold;
+  color: #2f4d8f;
+  margin-bottom: 4px;
+}
+
+.weakness-list-item-question {
+  display: block;
+  font-size: 0.94rem;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+.weakness-list-item-unavailable .weakness-list-item-question {
+  font-style: italic;
+}
+
+.weakness-list-item-stat {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: #556;
+}
+
+.weakness-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 0.92rem;
+  color: #445;
+}
+
+.weakness-detail-body {
+  margin-bottom: 18px;
+}
+
+.weakness-detail-unavailable {
+  margin: 0;
+  color: #667;
+  font-style: italic;
+}
+
+.weakness-detail-question {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+.weakness-detail-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 0 10px;
+  border-radius: 8px;
+}
+
+.weakness-detail-correct-answer {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  font-weight: bold;
+  color: #2e7d32;
+  word-break: break-word;
+}
+
+.weakness-detail-explanation {
   margin: 10px 0 0;
   padding-top: 10px;
   border-top: 1px solid #e0e4ec;

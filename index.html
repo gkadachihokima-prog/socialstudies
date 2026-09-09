@@ -52,10 +52,15 @@
               <p class="home-stat-label">前回学習</p>
               <p id="home-latest-study" class="home-stat-value home-stat-value-text">-</p>
             </button>
-            <div class="home-stat-card">
+            <button
+              type="button"
+              id="home-weak-count-card"
+              class="home-stat-card home-weak-count-card"
+              disabled
+            >
               <p class="home-stat-label">苦手問題</p>
               <p id="home-weak-count" class="home-stat-value">-</p>
-            </div>
+            </button>
           </div>
 
           <div id="home-detail-toggle-wrap" class="home-detail-toggle-wrap hidden">
@@ -136,6 +141,38 @@
         <div id="history-detail-list" class="history-detail-list"></div>
 
         <button id="history-detail-back-button" class="secondary-button">学習履歴へ戻る</button>
+      </div>
+    </section>
+
+    <section id="weakness-screen" class="screen">
+      <div class="card">
+        <h2>苦手問題</h2>
+
+        <p id="weakness-empty-message" class="weakness-empty-message hidden">
+          苦手な問題はまだありません。学習を続けると、ここに表示されます。
+        </p>
+        <p id="weakness-error" class="error-message"></p>
+
+        <div id="weakness-list" class="weakness-list"></div>
+
+        <button id="weakness-back-button" class="secondary-button">ホームへ戻る</button>
+      </div>
+    </section>
+
+    <section id="weakness-detail-screen" class="screen">
+      <div class="card">
+        <h2>苦手問題 詳細</h2>
+
+        <p id="weakness-detail-error" class="error-message"></p>
+
+        <div class="weakness-detail-summary">
+          <span id="weakness-detail-subject" class="weakness-detail-summary-item">-</span>
+          <span id="weakness-detail-stat" class="weakness-detail-summary-item">-</span>
+        </div>
+
+        <div id="weakness-detail-body" class="weakness-detail-body"></div>
+
+        <button id="weakness-detail-back-button" class="secondary-button">苦手問題一覧へ戻る</button>
       </div>
     </section>
 

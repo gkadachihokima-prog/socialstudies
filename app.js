@@ -31,6 +31,8 @@ import {
   showStartScreen,
   showHistoryScreen,
   showHistoryDetailScreen,
+  showWeaknessScreen,
+  showWeaknessDetailScreen,
   showTeacherScreen,
   showTestSetStudentScreen
 } from "./core/screen-controller.js";
@@ -79,6 +81,10 @@ import {
   showHistoryDetailError,
   renderHistoryDetailRetryActions
 } from "./features/history/history-detail-renderer.js";
+import { getWeaknessListViewModel } from "./features/weakness/weakness-list-service.js";
+import { renderWeaknessListScreen, showWeaknessListError } from "./features/weakness/weakness-list-renderer.js";
+import { buildWeaknessDetailViewModel } from "./features/weakness/weakness-detail-model.js";
+import { renderWeaknessDetailScreen, showWeaknessDetailError } from "./features/weakness/weakness-detail-renderer.js";
 import { initTeacherScreen } from "./features/teacher/teacher-controller.js";
 import { initTeacherHistorySection } from "./features/teacher/teacher-history-controller.js";
 import { initTestSetStudentScreen, showTestSetCompletion } from "./features/test-set-student/test-set-student-controller.js";
@@ -114,6 +120,8 @@ const quizScreen = document.getElementById("quiz-screen");
 const resultScreen = document.getElementById("result-screen");
 const historyScreen = document.getElementById("history-screen");
 const historyDetailScreen = document.getElementById("history-detail-screen");
+const weaknessScreen = document.getElementById("weakness-screen");
+const weaknessDetailScreen = document.getElementById("weakness-detail-screen");
 const teacherScreen = document.getElementById("teacher-screen");
 const testSetStudentScreen = document.getElementById("test-set-student-screen");
 const allScreens = [
@@ -123,6 +131,8 @@ const allScreens = [
   resultScreen,
   historyScreen,
   historyDetailScreen,
+  weaknessScreen,
+  weaknessDetailScreen,
   teacherScreen,
   testSetStudentScreen
 ];
@@ -142,6 +152,7 @@ const homeCurrentStreak = document.getElementById("home-current-streak");
 const homeLatestStudy = document.getElementById("home-latest-study");
 const homeLatestStudyCard = document.getElementById("home-latest-study-card");
 const homeWeakCount = document.getElementById("home-weak-count");
+const homeWeakCountCard = document.getElementById("home-weak-count-card");
 const homeDetailToggleWrap = document.getElementById("home-detail-toggle-wrap");
 const homeDetailToggle = document.getElementById("home-detail-toggle");
 const homeDetail = document.getElementById("home-detail");
@@ -159,6 +170,7 @@ const homeElements = {
   latestStudy: homeLatestStudy,
   latestStudyCard: homeLatestStudyCard,
   weakCount: homeWeakCount,
+  weakCountCard: homeWeakCountCard,
   detailToggleWrap: homeDetailToggleWrap,
   detail: homeDetail,
   fieldList: homeFieldList,
@@ -215,6 +227,34 @@ const historyDetailElements = {
   error: historyDetailError,
   retryWrongButton: historyDetailRetryWrongButton,
   retryButton: historyDetailRetryButton
+};
+
+// Phase4D-1+2: 苦手問題一覧画面（weakness-screen）のDOM要素。
+// weakness-list-renderer.jsはview modelのみを見て描画し、GAS通信・苦手判定・
+// Attempt開始は一切行わない（history-renderer.jsと同じ「取得済みデータ→DOM描画」の位置づけ）。
+const weaknessEmptyMessage = document.getElementById("weakness-empty-message");
+const weaknessError = document.getElementById("weakness-error");
+const weaknessList = document.getElementById("weakness-list");
+const weaknessBackButton = document.getElementById("weakness-back-button");
+
+const weaknessElements = {
+  emptyMessage: weaknessEmptyMessage,
+  errorMessage: weaknessError,
+  list: weaknessList
+};
+
+// Phase4D-1+2: 苦手問題「詳細」画面（weakness-detail-screen）のDOM要素。
+const weaknessDetailError = document.getElementById("weakness-detail-error");
+const weaknessDetailSubject = document.getElementById("weakness-detail-subject");
+const weaknessDetailStat = document.getElementById("weakness-detail-stat");
+const weaknessDetailBody = document.getElementById("weakness-detail-body");
+const weaknessDetailBackButton = document.getElementById("weakness-detail-back-button");
+
+const weaknessDetailElements = {
+  error: weaknessDetailError,
+  subjectLabel: weaknessDetailSubject,
+  stat: weaknessDetailStat,
+  body: weaknessDetailBody
 };
 
 // Task53: 講師用問題選定画面（teacher-screen）のDOM要素。
@@ -305,10 +345,13 @@ const reviewStartBannerCloseButton = document.getElementById("review-start-banne
 // home-renderer.js はこれらの中身（Bridge呼び出し・クイズ開始）を一切知らない。
 // Phase4C-1: onLatestStudyClickは「前回学習」カード押下時。home-renderer.jsは
 // 既存学習履歴詳細（history-detail-screen）の描画ロジックを一切知らない。
+// Phase4D-1+2: onWeakCountClickは「苦手問題」カード押下時。home-renderer.jsは
+// 苦手一覧画面（weakness-screen）の描画ロジックを一切知らない。
 const homePracticeCallbacks = {
   onPracticeWeakField: startWeaknessReview,
   onPracticeDormantField: startDormantReview,
-  onLatestStudyClick: handleHomeLatestStudyClick
+  onLatestStudyClick: handleHomeLatestStudyClick,
+  onWeakCountClick: goToWeaknessScreen
 };
 
 const studentNameInput = document.getElementById("student-name-input");
@@ -406,6 +449,8 @@ homeDetailToggle.addEventListener("click", () => toggleHomeDetail(homeElements))
 homeHistoryButton.addEventListener("click", goToHistoryScreen);
 historyBackButton.addEventListener("click", returnToHome);
 historyDetailBackButton.addEventListener("click", returnFromHistoryDetail);
+weaknessBackButton.addEventListener("click", returnFromWeaknessScreen);
+weaknessDetailBackButton.addEventListener("click", returnFromWeaknessDetail);
 
 homeTeacherModeButton.addEventListener("click", goToTeacherScreen);
 teacherBackButton.addEventListener("click", returnToHome);
@@ -1782,6 +1827,62 @@ function handleHistoryDetailClick(entry) {
 function handleHomeLatestStudyClick(entry) {
   historyDetailReturnTarget = "home";
   return showHistoryDetailForEntry(entry);
+}
+
+// Phase4D-1+2: ホーム「苦手問題」カードから、苦手問題一覧画面（weakness-screen）へ遷移する。
+// WeaknessServiceの取得自体は同期処理だが、questionIdから現在の問題マスタを解決する部分
+// （features/history/history-detail-service.jsのloadQuestionMapForFieldをそのまま再利用）が
+// CSV読込を伴う非同期処理のため、fetchResumeCandidateForStartScreen()と同じ
+// requestId + studentId二重チェックで、取得中に生徒が切り替わった場合の誤描画を防ぐ
+// （4D-3対象の「この1問を解く」「まとめて解く」ボタンは一切含まない、読み取り専用）。
+let weaknessListRequestId = 0;
+
+async function goToWeaknessScreen() {
+  if (!state.session.studentId) return;
+
+  const studentId = state.session.studentId;
+  const requestId = ++weaknessListRequestId;
+
+  try {
+    const viewModel = await getWeaknessListViewModel(studentId);
+    if (requestId !== weaknessListRequestId || state.session.studentId !== studentId) return;
+
+    renderWeaknessListScreen(viewModel, weaknessElements, handleWeaknessDetailClick);
+    showWeaknessScreen(weaknessScreen, allScreens);
+  } catch (error) {
+    console.error("苦手問題一覧の取得でエラーが発生しました（既存のHome表示には影響しません）:", error);
+    if (requestId !== weaknessListRequestId || state.session.studentId !== studentId) return;
+
+    showWeaknessListError(weaknessElements, "苦手問題の取得に失敗しました。時間をおいて再度お試しください。");
+    showWeaknessScreen(weaknessScreen, allScreens);
+  }
+}
+
+// Phase4D-1+2: 苦手一覧のcard押下時。itemはweakness-list-renderer.js側で描画時に
+// 既に解決済み（questionまで解決済み）のものをそのまま受け取るだけで、ここで
+// WeaknessServiceの再呼び出し・questionIdの再検索は行わない（4C-1/4C-2と同じ設計）。
+// 同期処理のみのため、非同期の競合ガードは不要。
+function handleWeaknessDetailClick(item) {
+  try {
+    const viewModel = buildWeaknessDetailViewModel(item);
+    renderWeaknessDetailScreen(viewModel, weaknessDetailElements);
+  } catch (error) {
+    console.error("苦手問題の詳細表示でエラーが発生しました（既存の一覧表示には影響しません）:", error);
+    showWeaknessDetailError(weaknessDetailElements, "この問題の詳細を表示できませんでした。");
+  }
+  showWeaknessDetailScreen(weaknessDetailScreen, allScreens);
+}
+
+// Phase4D-1+2: 苦手問題一覧・詳細の「戻る」。origin分岐は不要（Home→一覧→Home、
+// 一覧→詳細→一覧の1経路ずつのみ、4C-1のようなHome/History二方向の入口は無いため）。
+// weakness-screenは非表示中もDOM上に残ったまま（screen-controller.jsのactive切替のみ）の
+// ため、詳細から一覧へ戻る際に一覧を再取得・再描画しない（history-screenと同じ既存方針）。
+function returnFromWeaknessScreen() {
+  returnToHome();
+}
+
+function returnFromWeaknessDetail() {
+  showWeaknessScreen(weaknessScreen, allScreens);
 }
 
 // Phase3D-1: 学習履歴「もう一度やる」。二重押し防止のための簡易な再入防止フラグ

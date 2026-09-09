@@ -23,7 +23,16 @@ import { buildHistoryDetailViewModel } from "./history-detail-model.js";
 // fieldId -> Map(questionId -> 正規化済みQuestion、status不問)。
 const questionCacheByField = new Map();
 
-async function loadQuestionMapForField(fieldId) {
+/**
+ * Phase4D-1+2: features/weakness/weakness-list-service.js（苦手一覧・苦手詳細）からも
+ * 同じ「status不問でquestionIdから問題を解決するfieldId単位キャッシュ」を再利用するため
+ * export する（重複CSV loader・重複cacheを作らない、Phase4D事前監査の結論どおり）。
+ * キャッシュ自体（questionCacheByField）はこのモジュール内に閉じたまま、関数のみを共有する。
+ *
+ * @param {string} fieldId
+ * @returns {Promise<Map<string, Object>>}
+ */
+export async function loadQuestionMapForField(fieldId) {
   if (questionCacheByField.has(fieldId)) {
     return questionCacheByField.get(fieldId);
   }

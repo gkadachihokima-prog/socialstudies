@@ -30,6 +30,14 @@ export function showHistoryDetailScreen(historyDetailScreen, allScreens) {
   showScreen(historyDetailScreen, allScreens);
 }
 
+export function showWeaknessScreen(weaknessScreen, allScreens) {
+  showScreen(weaknessScreen, allScreens);
+}
+
+export function showWeaknessDetailScreen(weaknessDetailScreen, allScreens) {
+  showScreen(weaknessDetailScreen, allScreens);
+}
+
 export function showTeacherScreen(teacherScreen, allScreens) {
   showScreen(teacherScreen, allScreens);
 }
